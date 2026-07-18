@@ -1,0 +1,35 @@
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local database artifacts (SSMS, Azure Data Studio, DBeaver, MySQL Workbench)
+*.bak
+*.mdf
+*.ldf
+*.ndf
+*.sql.bak
+*.mwb.bak
+*.session.sql
+*~
+
+# Query result / export scratch files
+*.csv
+*.tsv
+*.xlsx
+!docs/**/*.csv
+
+# Local connection/config files, in case any get added later
+config.php
+*.env
+.env.*
+secrets.*
+
+# Logs
+*.log

@@ -1,7 +1,4 @@
--- 
--- Group 10
--- Members: Ivan Aupart, MySQL Expert
---          Mike Verwer, MS SQL Expert
+--    Created by Mike Verwer | mikeverwer.github.io
 -- ** ALL QUERIES IN THIS FILE WORK IN MS SQL Server **
 
 /*
