@@ -105,7 +105,7 @@ INSERT INTO Ad (PosterID, ReviewerID, Title, AdType, AdLength, AdWidth, Duration
 (11, 23, 'Math Tutor Available', 'Tutorship', 300, 200, 14, '2025-11-06', 'Approved'),
 (5, 19, 'Engineering Textbooks', 'Sale', 350, 220, 14, '2025-11-07', 'Approved'),
 (12, 25, 'Photography Services', 'Tutorship', 400, 250, 21, '2025-11-08', 'Approved'),
-(13, 19, 'Programming Help', 'Tutorship', 300, 200, 14, NULL, 'Approved'),
+(13, 19, 'Programming Help', 'Tutorship', 300, 200, 14, '2025-11-08', 'Approved'),
 
 -- Pending ads (4)
 (14, 23, 'Chemistry Lab Partner', 'Tutorship', 300, 200, 7, NULL, 'Pending'),
