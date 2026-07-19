@@ -378,7 +378,7 @@ BEGIN
     END IF;
 
     -- Validate reviewer
-    IF p_ReviewerID NOT IN (
+    IF p_ReviewerID IS NULL OR p_ReviewerID NOT IN (
         SELECT PersonID 
         FROM Employee 
         WHERE IsReviewer = 1

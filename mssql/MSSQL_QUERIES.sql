@@ -378,7 +378,7 @@ BEGIN
         RAISERROR('Invalid status. Allowed values are Approved, Rejected, or Pending', 16, 1);
         RETURN;
     END
-    IF @_ReviewerID NOT IN (
+    IF @_ReviewerID IS NULL OR @_ReviewerID NOT IN (
         SELECT PersonID 
         FROM Employee 
         WHERE IsReviewer = 1)
