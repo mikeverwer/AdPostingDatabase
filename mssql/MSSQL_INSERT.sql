@@ -84,14 +84,14 @@ INSERT INTO Student (PersonID, Major) VALUES
 GO
 
 -- Insert Employees (4 are reviewers)
-INSERT INTO Employee (PersonID, OfficeLocation, StartDate, PositionTitle, IsReviewer) VALUES
-(19, 'BLD-A-201', '2020-05-15', 'Staff', 1),      -- Reviewer
-(20, 'BLD-B-105', '2019-08-20', 'Faculty', 0),
-(21, 'BLD-C-301', '2021-03-10', 'Specialized', 0),
-(22, 'BLD-A-210', '2022-01-05', 'Administration', 0),
-(23, 'BLD-B-220', '2018-09-12', 'Staff', 1),       -- Reviewer
-(24, NULL, '2023-02-28', 'Support', 0),
-(25, 'BLD-B-105', '2020-11-18', 'Faculty', 1);    -- Reviewer (shares office with PersonID 20)
+INSERT INTO Employee (PersonID, OfficeLocation, Extension, StartDate, PositionTitle, IsReviewer) VALUES
+(19, 'BLD-201', '4201', '2020-05-15', 'Staff', 1),          -- Reviewer
+(20, 'BLD-105', '4105', '2019-08-20', 'Faculty', 0),
+(21, 'LIB-301', '5301', '2021-03-10', 'Specialized', 0),
+(22, 'BLD-210', '4210', '2022-01-05', 'Administration', 0),
+(23, 'NWN-220', '6220', '2018-09-12', 'Staff', 1),          -- Reviewer
+(24, NULL,      NULL,   '2023-02-28', 'Support', 0),
+(25, 'BLD-105', '4106', '2020-11-18', 'Faculty', 1);        -- Reviewer (shares office with PersonID 20)
 GO
 
 -- Insert 20 Ads (using PosterID, valid AdType values, valid Ad_Status)
@@ -156,16 +156,30 @@ INSERT INTO Ad_Posted_Board (AdID, Building, BldgFloor, Place) VALUES
 (13, 'BLD', 2, 'A');
 GO
 
--- Insert 10 Messages
+-- Insert 24 Messages
 INSERT INTO Messages (SenderID, AdID, TimeLogged, RecipientID, Content) VALUES
 (4, 1, '2025-10-16 10:30:00', 1, 'Is this textbook still available?'),
 (1, 1, '2025-10-16 11:15:00', 4, 'Yes! It is in great condition.'),
+(4, 1, '2025-10-16 11:45:00', 1, 'Great, would you take $40 for it?'),
+(1, 1, '2025-10-16 12:10:00', 4, 'I can do $45, it includes the solutions manual.'),
+(4, 1, '2025-10-16 12:30:00', 1, 'Deal, I can pick it up tomorrow afternoon.'),
+(6, 1, '2025-10-17 09:00:00', 1, 'Hi, is this textbook still up for grabs?'),
+(1, 1, '2025-10-17 09:20:00', 6, 'Sorry, already sold it to someone else!'),
 (5, 2, '2025-10-21 14:20:00', 4, 'I am interested in being your roommate. Can we meet?'),
 (6, 3, '2025-10-23 09:45:00', 5, 'What subjects do you tutor?'),
 (5, 3, '2025-10-23 16:30:00', 6, 'I tutor Math, Physics, and Engineering courses.'),
 (7, 4, '2025-10-26 12:00:00', 6, 'Are you available for a weekend event?'),
 (8, 5, '2025-10-29 08:15:00', 7, 'What are the specs on this laptop?'),
+(7, 5, '2025-10-29 08:40:00', 8, 'It is a 2022 model, 16GB RAM, 512GB SSD, barely used.'),
+(8, 5, '2025-10-29 09:10:00', 7, 'Does the battery still hold a charge well?'),
+(7, 5, '2025-10-29 09:25:00', 8, 'Yes, about 6 hours on a full charge.'),
+(3, 5, '2025-10-30 14:00:00', 7, 'Would you be willing to ship it to me?'),
+(7, 5, '2025-10-30 14:30:00', 3, 'Sorry, local pickup only for this one.'),
 (9, 9, '2025-11-05 17:40:00', 9, 'When is the apartment available?'),
 (10, 10, '2025-11-06 13:25:00', 10, 'What is your hourly rate for lessons?'),
-(11, 7, '2025-11-03 11:50:00', 8, 'Is the lab equipment still for sale?');
+(11, 7, '2025-11-03 11:50:00', 8, 'Is the lab equipment still for sale?'),
+(14, 11, '2025-11-07 10:00:00', 11, 'Do you tutor calculus for first-year engineering students?'),
+(11, 11, '2025-11-07 10:20:00', 14, 'Yes, I focus mostly on Calc I and II. When are you looking to start?'),
+(14, 11, '2025-11-07 10:35:00', 11, 'This week if possible, I have a midterm coming up.'),
+(15, 13, '2025-11-09 16:00:00', 12, 'Are you available to shoot a graduation event in December?');
 GO
