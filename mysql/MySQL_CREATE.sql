@@ -35,6 +35,9 @@ List of Incompatibilities with MS SQL Server
 	constraint is added, so no equivalent explicit indexing section is needed
 	here. MS SQL Server does not do this, which is why the MSSQL script includes
 	a dedicated Foreign Key Indexes section after the Foreign Keys section.
+- MySQL supports ON DELETE RESTRICT directly. MS SQL Server has no equivalent
+	keyword and uses NO ACTION instead; the two behave identically here, since
+	neither engine defers foreign key constraint checking.
 */
 
 CREATE DATABASE AdPostingDB;

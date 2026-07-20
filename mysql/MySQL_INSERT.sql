@@ -119,7 +119,7 @@ INSERT INTO Ad (PosterID, ReviewerID, Title, AdType, AdLength, AdWidth, Duration
 (18, 25, 'Giant Ad', 'Tutorship', 3500, 2100, 14, NULL, 'Rejected');
 
 -- Insert 5 Boards
-INSERT INTO Board (Building, BldgFloor, Place, BoardLength, BoardWidth) VALUES
+INSERT INTO Board (Building, BldgFloor, Slot, BoardLength, BoardWidth) VALUES
 ('BLD', 1, 'A', 2000, 1500),
 ('BLD', 1, 'B', 2500, 1875),
 ('BLD', 2, 'A', 2000, 1500),
@@ -129,7 +129,7 @@ INSERT INTO Board (Building, BldgFloor, Place, BoardLength, BoardWidth) VALUES
 ('NWN', 2, 'A', 1800, 1350);
 
 -- Post some ads to boards (only approved ads)
-INSERT INTO Ad_Posted_Board (AdID, Building, BldgFloor, Place) VALUES
+INSERT INTO Ad_Posted_Board (AdID, Building, BldgFloor, Slot) VALUES
 (1, 'BLD', 1, 'A'),
 (2, 'BLD', 1, 'B'),
 (3, 'BLD', 2, 'A'),

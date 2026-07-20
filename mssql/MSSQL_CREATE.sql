@@ -24,9 +24,12 @@ List of Incompatibilities with MySQL
 	for the Person table.
 	MySQL does not have this strictness, and so the trigger is not required.
 - MS SQL Server does not automatically create an index on every foreign key column when the constraint is 
-	added, so this script includes a dedicated Foreign Key Indexes section after the Foreign Keys section. N
+	added, so this script includes a dedicated Foreign Key Indexes section after the Foreign Keys section.
 	No equivalent explicit indexing section is needed in the MySQL script since foreign key indexes are 
 	created automatically.
+- MS SQL Server has no RESTRICT keyword for ON DELETE/ON UPDATE referential actions. NO ACTION is used 
+	instead, which behaves identically here, since neither engine defers foreign key constraint checking 
+	within a statement.
 */
 
 CREATE DATABASE AdPostingDB;
@@ -166,7 +169,7 @@ ALTER TABLE Ad_Posted_Board ADD CONSTRAINT fk_adpostedboard_board FOREIGN KEY (B
 
 ALTER TABLE Messages ADD CONSTRAINT fk_messages_sender    FOREIGN KEY (SenderID)    REFERENCES Person(PersonID);
 ALTER TABLE Messages ADD CONSTRAINT fk_messages_recipient FOREIGN KEY (RecipientID) REFERENCES Person(PersonID);
-ALTER TABLE Messages ADD CONSTRAINT fk_messages_ad        FOREIGN KEY (AdID)        REFERENCES Ad(AdID) ON DELETE RESTRICT;
+ALTER TABLE Messages ADD CONSTRAINT fk_messages_ad        FOREIGN KEY (AdID)        REFERENCES Ad(AdID) ON DELETE NO ACTION;
 -- NOTE: Ad deletion is restricted until messages are deleted to preserve active conversations and user chat history
 GO
 
