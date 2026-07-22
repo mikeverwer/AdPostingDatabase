@@ -1220,3 +1220,107 @@ BEGIN TRANSACTION;
         @_PosterID = 1, @_Title = 'Test', @_AdType = 'Rummage',
         @_AdLength = 100, @_AdWidth = 100, @_AdID = @BadAd OUTPUT;
 ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q36) Send a message about an ad. TimeLogged is left to its table default
+--      (CURRENT_TIMESTAMP), the same way SubmitAd leaves EnteredPending to
+--      its own default.
+--
+--      Two business rules restrict who can message whom, beyond the FK
+--      requirement that the sender, recipient, and ad all exist:
+--        - The ad's PosterID must be either the sender or the recipient.
+--          This isn't a general messaging system; every conversation is
+--          about a specific ad and involves whoever posted it.
+--        - Messaging is only allowed on an Approved ad, UNLESS the sender or
+--          recipient is a reviewer (Employee.IsReviewer = 1), in which case
+--          messaging is allowed regardless of AdStatus, so a reviewer can
+--          ask the poster a clarifying question before a decision is made.
+--          This checks reviewer status generally, not whether that specific
+--          person is THIS ad's ReviewerID -- there is currently no way to
+--          assign a reviewer to an ad before an outright Approve/Reject
+--          decision, so a per-ad check isn't yet meaningful.
+--      Self-messaging is intentionally allowed (SenderID = RecipientID);
+--      only the seed data avoids it, not the schema or this procedure.
+--      This procedure must be called inside a transaction the CALLER controls.
+CREATE OR ALTER PROCEDURE SendMessage
+    @_SenderID    INT,
+    @_AdID        INT,
+    @_RecipientID INT,
+    @_Content     VARCHAR(MAX)
+AS
+BEGIN
+    DECLARE @PosterID INT, @AdStatus VARCHAR(10);
+
+    SELECT @PosterID = PosterID, @AdStatus = AdStatus
+    FROM Ad WHERE AdID = @_AdID;
+
+    IF @PosterID IS NULL
+    BEGIN
+        RAISERROR('Error: No ad exists with the given AdID.', 16, 1);
+        RETURN;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = @_SenderID)
+    BEGIN
+        RAISERROR('Error: No person exists with the given SenderID.', 16, 1);
+        RETURN;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = @_RecipientID)
+    BEGIN
+        RAISERROR('Error: No person exists with the given RecipientID.', 16, 1);
+        RETURN;
+    END
+
+    IF @PosterID NOT IN (@_SenderID, @_RecipientID)
+    BEGIN
+        RAISERROR('Error: This ad''s poster must be either the sender or the recipient.', 16, 1);
+        RETURN;
+    END
+
+    IF @AdStatus <> 'Approved'
+       AND NOT EXISTS (
+            SELECT 1 FROM Employee
+            WHERE IsReviewer = 1 AND PersonID IN (@_SenderID, @_RecipientID)
+       )
+    BEGIN
+        RAISERROR('Error: This ad is not Approved, and neither party is a reviewer.', 16, 1);
+        RETURN;
+    END
+
+    IF @_Content IS NULL OR LTRIM(RTRIM(@_Content)) = ''
+    BEGIN
+        RAISERROR('Error: Message content cannot be blank.', 16, 1);
+        RETURN;
+    END
+
+    INSERT INTO Messages (SenderID, AdID, RecipientID, Content)
+    VALUES (@_SenderID, @_AdID, @_RecipientID, @_Content);
+END
+GO
+
+-- Approved ad, poster messaging a prospective buyer: should succeed
+BEGIN TRANSACTION;
+    EXEC SendMessage @_SenderID = 1, @_AdID = 1, @_RecipientID = 18, @_Content = 'Is this still available?';
+ROLLBACK TRANSACTION;
+
+-- Pending ad, a reviewer asking the poster a clarifying question: should succeed
+BEGIN TRANSACTION;
+    EXEC SendMessage @_SenderID = 22, @_AdID = 25, @_RecipientID = 17, @_Content = 'Can you confirm the dimensions?';
+ROLLBACK TRANSACTION;
+
+-- Should fail - poster not involved on either side
+BEGIN TRANSACTION;
+    EXEC SendMessage @_SenderID = 18, @_AdID = 25, @_RecipientID = 22, @_Content = 'hi';
+ROLLBACK TRANSACTION;
+
+-- Should fail - Pending ad, neither party is a reviewer
+BEGIN TRANSACTION;
+    EXEC SendMessage @_SenderID = 17, @_AdID = 25, @_RecipientID = 18, @_Content = 'hi';
+ROLLBACK TRANSACTION;
+
+-- Should fail - blank content
+BEGIN TRANSACTION;
+    EXEC SendMessage @_SenderID = 1, @_AdID = 1, @_RecipientID = 18, @_Content = '   ';
+ROLLBACK TRANSACTION;

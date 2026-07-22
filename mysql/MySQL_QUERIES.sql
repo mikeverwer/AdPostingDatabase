@@ -1236,3 +1236,89 @@ ROLLBACK;
 START TRANSACTION;
     CALL SubmitAd(1, 'Test', 'Rummage', 100, 100, NULL, @BadAd);
 ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- Q36) Send a message about an ad. TimeLogged is left to its table default
+--      (CURRENT_TIMESTAMP). Same two business rules as the MSSQL version:
+--      the ad's poster must be sender or recipient, and messaging is only
+--      allowed on an Approved ad unless the sender or recipient is a
+--      reviewer generally (not necessarily this ad's own reviewer, since
+--      there is currently no way to assign one before an outright decision).
+--      Self-messaging is intentionally allowed.
+--      This procedure must be called inside a transaction the CALLER controls.
+DROP PROCEDURE IF EXISTS SendMessage;
+
+DELIMITER $$
+
+CREATE PROCEDURE SendMessage (
+    IN p_SenderID    INT,
+    IN p_AdID        INT,
+    IN p_RecipientID INT,
+    IN p_Content     TEXT
+)
+BEGIN
+    DECLARE v_PosterID INT;
+    DECLARE v_AdStatus VARCHAR(10);
+
+    SELECT PosterID, AdStatus INTO v_PosterID, v_AdStatus
+    FROM Ad WHERE AdID = p_AdID;
+
+    IF v_PosterID IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No ad exists with the given AdID.';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = p_SenderID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No person exists with the given SenderID.';
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = p_RecipientID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No person exists with the given RecipientID.';
+    END IF;
+
+    IF v_PosterID NOT IN (p_SenderID, p_RecipientID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This ad''s poster must be either the sender or the recipient.';
+    END IF;
+
+    IF v_AdStatus <> 'Approved'
+       AND NOT EXISTS (
+            SELECT 1 FROM Employee
+            WHERE IsReviewer = 1 AND PersonID IN (p_SenderID, p_RecipientID)
+       ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This ad is not Approved, and neither party is a reviewer.';
+    END IF;
+
+    IF p_Content IS NULL OR TRIM(p_Content) = '' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Message content cannot be blank.';
+    END IF;
+
+    INSERT INTO Messages (SenderID, AdID, RecipientID, Content)
+    VALUES (p_SenderID, p_AdID, p_RecipientID, p_Content);
+END$$
+
+DELIMITER ;
+
+-- Approved ad, poster messaging a prospective buyer: should succeed
+START TRANSACTION;
+    CALL SendMessage(1, 1, 18, 'Is this still available?');
+ROLLBACK;
+
+-- Pending ad, a reviewer asking the poster a clarifying question: should succeed
+START TRANSACTION;
+    CALL SendMessage(22, 25, 17, 'Can you confirm the dimensions?');
+ROLLBACK;
+
+-- Should fail - poster not involved on either side
+START TRANSACTION;
+    CALL SendMessage(18, 25, 22, 'hi');
+ROLLBACK;
+
+-- Should fail - Pending ad, neither party is a reviewer
+START TRANSACTION;
+    CALL SendMessage(17, 25, 18, 'hi');
+ROLLBACK;
+
+-- Should fail - blank content
+START TRANSACTION;
+    CALL SendMessage(1, 1, 18, '   ');
+ROLLBACK;
