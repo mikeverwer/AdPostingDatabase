@@ -471,7 +471,7 @@ ROLLBACK TRANSACTION;
 -- -------------------------------------------------------------------------------
 GO
 -- Q18) Set IsReviewer role for an employee
-CREATE OR ALTER PROCEDURE SetReviewerRole
+CREATE OR ALTER PROCEDURE SetReviewerPermission
 @_EmpID INT,
 @_IsRev BIT
 AS
@@ -491,7 +491,7 @@ END
 GO
 
 BEGIN TRANSACTION;
-    EXEC SetReviewerRole @_EmpID=20, @_IsRev=1;
+    EXEC SetReviewerPermission @_EmpID=20, @_IsRev=1;
 ROLLBACK TRANSACTION;
 
 -- -------------------------------------------------------------------------------
@@ -933,4 +933,218 @@ BEGIN TRANSACTION;
         @_FirstName = 'Duplicate', @_LastName = 'Email',
         @_Email = 'emma.johnson@college.edu', @_CollegeID = 'STU000019',
         @_PersonID = @DupEmail OUTPUT;
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q29) Grant a person College Member status (Person -> CollegeMember).
+--      Requires the person already exist in Person and not already be a
+--      College Member. Use for someone gaining a College ID without yet
+--      being a Student or Employee (e.g. an alum retaining board privileges).
+CREATE OR ALTER PROCEDURE GrantCollegeMemberRole
+    @_PersonID   INT,
+    @_CollegeID  CHAR(9),
+    @_Department VARCHAR(50) = NULL
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: No person exists with the given PersonID.', 16, 1);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM CollegeMember WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person already holds College Member status.', 16, 1);
+        RETURN;
+    END
+
+    IF @_CollegeID IS NULL OR LTRIM(RTRIM(@_CollegeID)) = ''
+    BEGIN
+        RAISERROR('Error: College ID is required.', 16, 1);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM CollegeMember WHERE CollegeID = @_CollegeID)
+    BEGIN
+        RAISERROR('Error: A college member with the given College ID already exists.', 16, 1);
+        RETURN;
+    END
+
+    INSERT INTO CollegeMember (PersonID, CollegeID, Department)
+    VALUES (@_PersonID, @_CollegeID, @_Department);
+END
+GO
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q30) Revoke College Member status (deletes the CollegeMember row).
+--      Refuses if the person still holds Student or Employee status, since
+--      both are structurally dependent on CollegeMember (fk_student_collegemember,
+--      fk_employee_collegemember). Revoke those first.
+CREATE OR ALTER PROCEDURE RevokeCollegeMemberRole
+    @_PersonID INT
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM CollegeMember WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person does not currently hold College Member status.', 16, 1);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM Student WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person still holds Student status. Revoke it first.', 16, 1);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM Employee WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person still holds Employee status. Revoke it first.', 16, 1);
+        RETURN;
+    END
+
+    DELETE FROM CollegeMember WHERE PersonID = @_PersonID;
+END
+GO
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q31) Grant a person Student status (CollegeMember -> Student).
+--      Requires the person already hold College Member status. Does not
+--      check Employee status either way, so this is also how a person who
+--      already holds Employee status becomes a dual Student/Employee (e.g.
+--      a graduate student TA).
+CREATE OR ALTER PROCEDURE GrantStudentRole
+    @_PersonID INT,
+    @_Major    VARCHAR(60) = NULL
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM CollegeMember WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person must hold College Member status before being granted Student status.', 16, 1);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM Student WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person already holds Student status.', 16, 1);
+        RETURN;
+    END
+
+    INSERT INTO Student (PersonID, Major)
+    VALUES (@_PersonID, @_Major);
+END
+GO
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q32) Revoke Student status (deletes the Student row only; College Member
+--      and, if held, Employee status are untouched).
+CREATE OR ALTER PROCEDURE RevokeStudentRole
+    @_PersonID INT
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Student WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person does not currently hold Student status.', 16, 1);
+        RETURN;
+    END
+
+    DELETE FROM Student WHERE PersonID = @_PersonID;
+END
+GO
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q33) Grant a person Employee status (CollegeMember -> Employee).
+--      Requires the person already hold College Member status. Does not
+--      check Student status either way, so this is also how an existing
+--      Student becomes a dual Student/Employee (e.g. a graduate student TA).
+--      Extension requires OfficeLocation (chk_employee_extension_requires_office).
+--      Not to be confused with SetReviewerPermission, which only flips the
+--      IsReviewer flag on an Employee row that already exists.
+CREATE OR ALTER PROCEDURE GrantEmployeeRole
+    @_PersonID       INT,
+    @_OfficeLocation VARCHAR(15) = NULL,
+    @_Extension      VARCHAR(6)  = NULL,
+    @_PositionTitle  VARCHAR(20),
+    @_IsReviewer     BIT         = 0
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM CollegeMember WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person must hold College Member status before being granted Employee status.', 16, 1);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM Employee WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person already holds Employee status.', 16, 1);
+        RETURN;
+    END
+
+    IF @_PositionTitle NOT IN ('Faculty', 'Administration', 'Staff', 'Support', 'Specialized')
+    BEGIN
+        RAISERROR('Error: Invalid position title. Allowed values are Faculty, Administration, Staff, Support, or Specialized.', 16, 1);
+        RETURN;
+    END
+
+    IF @_Extension IS NOT NULL AND @_OfficeLocation IS NULL
+    BEGIN
+        RAISERROR('Error: An extension cannot be assigned without an office location.', 16, 1);
+        RETURN;
+    END
+
+    INSERT INTO Employee (PersonID, OfficeLocation, Extension, PositionTitle, IsReviewer)
+    VALUES (@_PersonID, @_OfficeLocation, @_Extension, @_PositionTitle, @_IsReviewer);
+END
+GO
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q34) Revoke Employee status. Any ad this person has reviewed has its
+--      ReviewerID explicitly cleared first (review history is preserved,
+--      matching vw_ReviewCountsPerReviewer's existing handling of deleted
+--      reviewers), then the Employee row is deleted. College Member and,
+--      if held, Student status are untouched.
+--      Not to be confused with SetReviewerPermission, which only flips the
+--      IsReviewer flag; this removes the Employee row entirely.
+CREATE OR ALTER PROCEDURE RevokeEmployeeRole
+    @_PersonID INT
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Employee WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: This person does not currently hold Employee status.', 16, 1);
+        RETURN;
+    END
+
+    UPDATE Ad SET ReviewerID = NULL WHERE ReviewerID = @_PersonID;
+
+    DELETE FROM Employee WHERE PersonID = @_PersonID;
+END
+GO
+
+-- -------------------------------------------------------------------------------
+-- Demonstrates a graduate student TA: Priya Nair (PersonID 21, a Student) is
+-- granted Employee status without giving up Student status.
+BEGIN TRANSACTION;
+    EXEC GrantEmployeeRole
+        @_PersonID = 21, @_OfficeLocation = 'MTH-110', @_Extension = '7110',
+        @_PositionTitle = 'Staff', @_IsReviewer = 0;
+    SELECT * FROM Student WHERE PersonID = 21;    -- still present
+    SELECT * FROM Employee WHERE PersonID = 21;   -- now present too
+ROLLBACK TRANSACTION;
+
+-- Should fail - RevokeCollegeMemberRole refuses while Student status remains
+BEGIN TRANSACTION;
+    EXEC RevokeCollegeMemberRole @_PersonID = 5;  -- Emma Johnson, a Student
+ROLLBACK TRANSACTION;
+
+-- Should succeed - revoking Employee nulls ReviewerID on ads they reviewed
+BEGIN TRANSACTION;
+    SELECT COUNT(*) AS ReviewedBefore FROM Ad WHERE ReviewerID = 22;
+    EXEC RevokeEmployeeRole @_PersonID = 22;  -- James Harris, a reviewer
+    SELECT COUNT(*) AS ReviewedAfter FROM Ad WHERE ReviewerID = 22;  -- expect 0
 ROLLBACK TRANSACTION;
