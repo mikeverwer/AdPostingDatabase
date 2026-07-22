@@ -1324,3 +1324,80 @@ ROLLBACK TRANSACTION;
 BEGIN TRANSACTION;
     EXEC SendMessage @_SenderID = 1, @_AdID = 1, @_RecipientID = 18, @_Content = '   ';
 ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q37) Delete a single message, identified by its full primary key
+--      (SenderID, AdID, TimeLogged). Messages has no surrogate key, so a
+--      caller offering to delete one line of a displayed conversation needs
+--      to pass back the exact triple it was given when the message was
+--      retrieved.
+--      This procedure must be called inside a transaction the CALLER controls.
+CREATE OR ALTER PROCEDURE DeleteMessage
+    @_SenderID   INT,
+    @_AdID       INT,
+    @_TimeLogged DATETIME
+AS
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM Messages
+        WHERE SenderID = @_SenderID AND AdID = @_AdID AND TimeLogged = @_TimeLogged
+    )
+    BEGIN
+        RAISERROR('Error: No message exists with the given SenderID, AdID, and TimeLogged.', 16, 1);
+        RETURN;
+    END
+
+    DELETE FROM Messages
+    WHERE SenderID = @_SenderID AND AdID = @_AdID AND TimeLogged = @_TimeLogged;
+END
+GO
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q38) Delete every message attached to a given ad. This is the mechanism
+--      WithdrawAd will use to clear fk_messages_ad (ON DELETE NO ACTION in
+--      MSSQL, RESTRICT in MySQL) before deleting the Ad row itself -- that
+--      restriction is deliberate (see README), so messages must be removed
+--      explicitly rather than cascaded away.
+--      This procedure must be called inside a transaction the CALLER controls.
+CREATE OR ALTER PROCEDURE DeleteAdMessages
+    @_AdID         INT,
+    @_DeletedCount INT = NULL OUTPUT
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Ad WHERE AdID = @_AdID)
+    BEGIN
+        RAISERROR('Error: No ad exists with the given AdID.', 16, 1);
+        RETURN;
+    END
+
+    DELETE FROM Messages WHERE AdID = @_AdID;
+    SET @_DeletedCount = @@ROWCOUNT;
+END
+GO
+
+-- Delete one message: should succeed
+BEGIN TRANSACTION;
+    EXEC DeleteMessage @_SenderID = 5, @_AdID = 1, @_TimeLogged = '2026-06-17 10:30:00';
+    SELECT COUNT(*) AS RemainingOnAd1 FROM Messages WHERE AdID = 1;  -- one fewer than before
+ROLLBACK TRANSACTION;
+
+-- Should fail - no message with that exact key
+BEGIN TRANSACTION;
+    EXEC DeleteMessage @_SenderID = 999, @_AdID = 1, @_TimeLogged = '2026-06-17 10:30:00';
+ROLLBACK TRANSACTION;
+
+-- Bulk delete every message on an ad: should succeed
+BEGIN TRANSACTION;
+    DECLARE @Deleted INT;
+    EXEC DeleteAdMessages @_AdID = 1, @_DeletedCount = @Deleted OUTPUT;
+    SELECT @Deleted AS MessagesDeleted;
+    SELECT COUNT(*) AS RemainingOnAd1 FROM Messages WHERE AdID = 1;  -- expect 0
+ROLLBACK TRANSACTION;
+
+-- Should fail - no such ad
+BEGIN TRANSACTION;
+    DECLARE @BadDeleted INT;
+    EXEC DeleteAdMessages @_AdID = 9999, @_DeletedCount = @BadDeleted OUTPUT;
+ROLLBACK TRANSACTION;
