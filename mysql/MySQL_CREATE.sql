@@ -80,7 +80,6 @@ CREATE TABLE Employee (
     PersonID 		INT             NOT NULL,
     OfficeLocation 	VARCHAR(15)	    NULL, 	-- Some employees may not have an office, some may share an office.
     Extension 		VARCHAR(6) 		NULL,   -- internal line extension; NULL if the employee has no office (see OfficeLocation)
-    StartDate 		DATE			NOT NULL,
     PositionTitle	VARCHAR(20)		NOT NULL,
     IsReviewer 		BIT 			NOT NULL    DEFAULT (0),
 	-- Constraints 
@@ -92,19 +91,21 @@ CREATE TABLE Employee (
 );
 
 CREATE TABLE Ad (
-    AdID        INT AUTO_INCREMENT  NOT NULL,
-	PosterID 	INT					NOT NULL,
-	ReviewerID 	INT					NULL,
-	Title 		VARCHAR(128)		NOT NULL,
-	AdType 		VARCHAR(20)			NOT NULL,
-	AdLength 	INT 				NOT NULL,
-	AdWidth 	INT					NOT NULL,
-	Duration 	INT 				NOT NULL	DEFAULT (14),
-	PostDate 	DATE				NULL,
-	AdStatus 	VARCHAR(10) 		NOT NULL	DEFAULT ('Pending'), 
+    AdID            INT AUTO_INCREMENT  NOT NULL,
+	PosterID 	    INT					NOT NULL,
+	ReviewerID 	    INT					NULL,
+	Title 		    VARCHAR(128)		NOT NULL,
+	AdType 		    VARCHAR(20)			NOT NULL,
+	AdLength 	    INT 				NOT NULL,
+	AdWidth 	    INT					NOT NULL,
+	Duration 	    INT 				NOT NULL	DEFAULT (14),
+	PostDate 	    DATE				NULL,
+	AdStatus 	    VARCHAR(10) 		NOT NULL	DEFAULT ('Pending'), 
+    EnteredPending  DATE                NOT NULL    DEFAULT (CURRENT_DATE),
+    ReviewDate      DATE                NULL,
 	-- Constraints 	
     PRIMARY KEY (AdID),
-    CONSTRAINT chk_ad_type              CHECK (AdType IN ('Tutorship','Rent','Sale','Roommate','Event')),
+    CONSTRAINT chk_ad_type              CHECK (AdType IN ('Tutorship','Rent','Sale','Roommate','Event', 'Service', 'Other')),
     CONSTRAINT chk_ad_status            CHECK (AdStatus IN ('Pending','Approved','Rejected')),
     CONSTRAINT chk_ad_poster_reviewer   CHECK (PosterID <> ReviewerID),
     CONSTRAINT chk_ad_duration_positive CHECK (Duration > 0),
@@ -112,8 +113,10 @@ CREATE TABLE Ad (
     CONSTRAINT chk_ad_adwidth_positive  CHECK (AdWidth > 0),
 	CONSTRAINT chk_ad_postdate_requires_approval 
 		CHECK (PostDate IS NULL OR AdStatus = 'Approved'),
-	CONSTRAINT chk_ad_approval_requires_postdate
-		CHECK (AdStatus <> 'Approved' OR PostDate IS NOT NULL)    
+	CONSTRAINT chk_ad_reviewdate_requires_nonpending
+        CHECK (ReviewDate IS NULL OR AdStatus <> 'Pending'),
+    CONSTRAINT chk_ad_nonpending_requires_reviewdate
+        CHECK (AdStatus = 'Pending' OR ReviewDate IS NOT NULL)  
 );
 
 CREATE TABLE Board (

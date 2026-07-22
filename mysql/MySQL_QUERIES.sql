@@ -36,15 +36,19 @@ particularly when it comes to using dates and datetimes.
 -- -------------------------------------------------------------------------------
 
 -- Q1) Count how many messages each ad has
+DROP VIEW IF EXISTS vw_NumMessagesPerAd;
 
-SELECT A.AdID,
-       A.Title,
-       (
-            SELECT COUNT(*)
-            FROM Messages AS M
-            WHERE M.AdID = A.AdID
-        ) AS NumMessages
-FROM Ad AS A;
+CREATE VIEW vw_NumMessagesPerAd AS
+SELECT
+    A.AdID,
+    A.Title,
+    COUNT(M.SenderID) AS NumMessages
+FROM 
+    Ad AS A
+    LEFT JOIN Messages AS M ON M.AdID = A.AdID
+GROUP BY
+    A.AdID,
+    A.Title;
 
 
 -- -------------------------------------------------------------------------------
@@ -75,23 +79,26 @@ CALL GetAllADMessages(1);
 -- -------------------------------------------------------------------------------
 
 -- Q3) Calculate total number of messages sent and recieved per user
+DROP VIEW IF EXISTS vw_MessageCountsPerUser;
+
+CREATE VIEW vw_MessageCountsPerUser AS
+WITH MessageRoles AS (
+    SELECT SenderID    AS PersonID, 'Sent'     AS Role FROM Messages
+    UNION ALL
+    SELECT RecipientID AS PersonID, 'Received' AS Role FROM Messages
+)
 SELECT
     P.PersonID,
     CONCAT(P.FirstName, ' ', P.LastName) AS UserName,
-    SentCounts.NumSent,
-    RecievedCounts.NumRecieved
+    SUM(CASE WHEN MR.Role = 'Sent'     THEN 1 ELSE 0 END) AS NumSent,
+    SUM(CASE WHEN MR.Role = 'Received' THEN 1 ELSE 0 END) AS NumReceived
 FROM 
     Person AS P
-    LEFT JOIN (
-        SELECT SenderID, COUNT(SenderID) AS NumSent
-        FROM Messages
-        GROUP BY SenderID
-    ) AS SentCounts ON P.PersonID = SentCounts.SenderID
-    LEFT JOIN (
-        SELECT RecipientID, COUNT(RecipientID) AS NumRecieved
-        FROM Messages
-        GROUP BY RecipientID
-    ) AS RecievedCounts ON P.PersonID = RecievedCounts.RecipientID;
+    LEFT JOIN MessageRoles AS MR ON P.PersonID = MR.PersonID
+GROUP BY 
+    P.PersonID, 
+    P.FirstName, 
+    P.LastName;
 
 -- -------------------------------------------------------------------------------
 
@@ -100,14 +107,16 @@ DROP VIEW IF EXISTS PostedAdsInfo;
 
 CREATE VIEW PostedAdsInfo AS
 SELECT 
-    APB.Building,
+	APB.Building,
     APB.BldgFloor,
     APB.Slot,
     Ad.AdID,
     Ad.Title,
-    Ad.AdType,
-    Ad.PosterID,
-    Ad.ReviewerID,
+	Ad.AdType,
+	Ad.PosterID,
+	Ad.ReviewerID,    
+    Ad.AdStatus,
+    Ad.ReviewDate,
     Ad.PostDate,
     Ad.Duration,
     Ad.AdWidth,
@@ -123,18 +132,20 @@ ORDER BY Building, BldgFloor, Slot;
 -- -------------------------------------------------------------------------------
 
 -- Q5) Create View to list board occupancy details: board size, total ad sizes, and remaining board space.
-DROP VIEW IF EXISTS BoardSpace;
+DROP VIEW IF EXISTS vw_BoardSpace;
 
-CREATE VIEW BoardSpace AS
-SELECT 
+CREATE VIEW vw_BoardSpace AS
+SELECT
     B.Building,
     B.BldgFloor,
     B.Slot,
+    COUNT(DISTINCT A.AdID) AS NumAds,
     B.BoardWidth,
     B.BoardLength,
-    (B.BoardWidth * B.BoardLength) AS BoardArea,
-    IFNULL(SUM(A.AdWidth * A.AdLength), 0) AS TotalAdArea,
-    (B.BoardWidth * B.BoardLength) - IFNULL(SUM(A.AdWidth * A.AdLength), 0) AS RemainingBoardSpace
+    B.BoardWidth * B.BoardLength AS BoardArea,
+    ISNULL(SUM(A.AdWidth * A.AdLength), 0) AS TotalAdArea,
+    (B.BoardWidth * B.BoardLength) - ISNULL(SUM(A.AdWidth * A.AdLength), 0) 
+        AS RemainingBoardSpace
 FROM 
     PostedAdsInfo AS A
     RIGHT JOIN Board AS B ON 
@@ -146,22 +157,39 @@ GROUP BY
     B.BldgFloor, 
     B.Slot,
     B.BoardWidth,
-    B.BoardLength;
+    B.BoardLength
 
-
--- DROP VIEW BoardSpace;
 SELECT *
-FROM BoardSpace
+FROM vw_BoardSpace
 ORDER BY
     Building, 
     BldgFloor, 
     Slot;
 
-SELECT * FROM Board;
+-- -------------------------------------------------------------------------------
+
+-- Q6) Create a display view for board occupancy details.
+DROP VIEW IF EXISTS vw_BoardSpaceDisplay;
+
+CREATE VIEW vw_BoardSpaceDisplay AS
+SELECT
+    CONCAT(Building, '-', BldgFloor, '-', Slot) AS BoardID,
+    NumAds,
+    BoardWidth,
+    BoardLength,
+    FORMAT(BoardArea, 0) AS BoardArea,
+    FORMAT(TotalAdArea, 0) AS TotalAdArea,
+    FORMAT(RemainingBoardSpace, 0) AS AvailableSpace,
+    RANK() OVER (ORDER BY RemainingBoardSpace ASC) AS FullnessRank
+FROM vw_BoardSpace;
+
+SELECT *
+FROM vw_BoardSpaceDisplay
+ORDER BY FullnessRank;
 
 -- -------------------------------------------------------------------------------
 
--- Q6) Procedure to evaluate if a given ad will fit on each board
+-- Q7) Procedure to evaluate if a given ad will fit on each board
 DROP PROCEDURE IF EXISTS CheckAdFit;
 
 DELIMITER $$
@@ -171,16 +199,16 @@ BEGIN
         B.Building,
         B.BldgFloor,
         B.Slot,
-        B.RemainingBoardSpace,
+        FORMAT(B.RemainingBoardSpace, 0) AS 'Available Space (cm²)',
         CASE 
             WHEN B.RemainingBoardSpace - A.AdLength * A.AdWidth > 0 THEN 'May Fit'
             ELSE 'Will Not Fit'
         END AS FitStatus
     FROM
-        BoardSpace AS B
+        vw_BoardSpace AS B
         CROSS JOIN Ad AS A
     WHERE A.AdID = p_AdID 
-    ORDER BY B.RemainingBoardSpace;
+    ORDER BY B.RemainingBoardSpace DESC;
 END$$
 
 DELIMITER ;
@@ -189,44 +217,8 @@ CALL CheckAdFit(1);
 
 -- -------------------------------------------------------------------------------
 
--- Q7) Find largest ad(s) posted to a board by area, displaying ad dimensions
-SELECT
-    A.AdID,
-    A.AdLength,
-    A.AdWidth,
-    A.AdLength * A.AdWidth AS AdArea
-FROM 
-    Ad AS A 
-    INNER JOIN Ad_Posted_Board AS APB ON A.AdID = APB.AdID
-WHERE 
-    A.AdLength * A.AdWidth = (
-        SELECT MAX(A2.AdLength * A2.AdWidth)
-        FROM Ad AS A2
-        INNER JOIN Ad_Posted_Board AS APB2 ON A2.AdID = APB2.AdID
-    );
-
--- -------------------------------------------------------------------------------
-
--- Q8) Show number of ads on each board
-SELECT 
-    B.Building, 
-    B.BldgFloor, 
-    B.Slot,
-    COUNT(APB.AdID) AS NumAds
-FROM Board AS B 
-    LEFT JOIN Ad_Posted_Board AS APB ON 
-        B.Building  = APB.Building AND 
-        B.BldgFloor = APB.BldgFloor AND 
-        B.Slot      = APB.Slot
-GROUP BY
-    B.Building, 
-    B.BldgFloor, 
-    B.Slot;
-
--- -------------------------------------------------------------------------------
-
 -- Q9) Find all ads that are past duration
-CREATE OR RESlot VIEW vw_ExpiredAds AS
+CREATE OR REPLACE VIEW vw_ExpiredAds AS
 SELECT 
     AdID, 
     PostDate, 
@@ -241,91 +233,168 @@ SELECT * FROM vw_ExpiredAds;
 -- -------------------------------------------------------------------------------
 
 -- Q10) Display counts of adds rejected and ads approved for each reviewer
+DROP VIEW IF EXISTS vw_ReviewCountsPerReviewer;
+
+CREATE VIEW vw_ReviewCountsPerReviewer AS
 SELECT 
     R.PersonID,
     CONCAT(P.FirstName, ' ', P.LastName) AS ReviewerName,
-    SUM(CASE WHEN A.AdStatus = 'Approved' THEN 1 END) AS ApprovedCount,
-    SUM(CASE WHEN A.AdStatus = 'Rejected' THEN 1 END) AS RejectedCount
+    SUM(CASE WHEN A.AdStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
+    SUM(CASE WHEN A.AdStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
+    SUM(CASE WHEN A.AdStatus IN ('Approved', 'Rejected') THEN 1 ELSE 0 END) AS TotalReviews
 FROM 
     Employee AS R
-    INNER JOIN Person AS P ON R.PersonID = P.PersonID
-    INNER JOIN Ad AS A ON R.PersonID = A.ReviewerID
+    LEFT JOIN Person AS P ON R.PersonID = P.PersonID
+    LEFT JOIN Ad AS A ON R.PersonID = A.ReviewerID
+WHERE R.IsReviewer = 1
 GROUP BY
     R.PersonID,
     P.FirstName,
     P.LastName;
+    
+UNION ALL
+
+SELECT 
+    NULL AS PersonID,
+    'Deleted Reviewer(s)' AS ReviewerName,
+    SUM(CASE WHEN AdStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
+    SUM(CASE WHEN AdStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
+    COUNT(*) AS TotalReviews
+FROM Ad
+WHERE ReviewerID IS NULL AND AdStatus IN ('Approved', 'Rejected')
+HAVING COUNT(*) > 0;
+
+SELECT * FROM vw_ReviewCountsPerReviewer
+WHERE PersonID IS NOT NULL
+ORDER BY TotalReviews DESC;
 
 -- -------------------------------------------------------------------------------
 
 -- Q11) Show ads that are approved but not posted yet
+DROP VIEW IF EXISTS vw_PendingPosting;
+
+CREATE VIEW vw_PendingPosting AS
 SELECT * 
 FROM Ad AS A
 WHERE 
-    A.AdStatus = 'Approved' AND 
-    A.AdID NOT IN (
-        SELECT AdID FROM Ad_Posted_Board
+    A.AdStatus = 'Approved' 
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM Ad_Posted_Board AS APB 
+        WHERE APB.AdID = A.AdID
     );
 
 -- -------------------------------------------------------------------------------
 
--- Q12) Show ads that are posted to multiple boards
-SELECT 
-    AdID, 
-    COUNT(DISTINCT CONCAT(Building, BldgFloor, Slot)) AS PostingCount
-FROM Ad_Posted_Board
-GROUP BY 
-    AdID
-HAVING 
-    COUNT(DISTINCT CONCAT(Building, BldgFloor, Slot)) > 1;
+-- Q12) Procedure to find all the information and locations of a posted ad
+DROP PROCEDURE IF EXISTS GetAdPostings;
+
+DELIMITER $$
+
+CREATE PROCEDURE GetAdPostings
+(
+    p_AdID INT
+)
+BEGIN
+    SELECT *
+    FROM PostedAdsInfo
+    WHERE AdID = p_AdID;
+END$$
+
+DELIMITER ;
+
+CALL GetAdPostings(4);
+
 
 -- -------------------------------------------------------------------------------
 
--- Q13) Find people who have posted at least one rejected ad showing poster, ad title, and reviewer name
-SELECT
-       P.PersonID,
-       CONCAT(P.FirstName, ' ', P.LastName) AS PosterName,
-       A.AdID,
-       A.Title,
-       CONCAT(R.FirstName, ' ', R.LastName) AS ReviewerName
-FROM 
-    Person AS P
-    INNER JOIN Ad AS A ON P.PersonID = A.PosterID 
-    INNER JOIN Person AS R ON R.PersonID = A.ReviewerID
-WHERE A.AdStatus = 'Rejected';
+-- Q13) Procedure to find people who have posted multiple rejected ads
+DROP PROCEDURE IF EXISTS GetNoncompliantPosters;
+
+DELIMITER $$
+
+CREATE PROCEDURE GetNoncompliantPosters
+(
+    p_MinRejections INT
+)
+BEGIN
+
+    IF p_MinRejections IS NULL THEN
+        SET p_MinRejections = 2;
+    END IF;
+
+    SELECT
+        P.PersonID,
+        CONCAT(P.FirstName, ' ', P.LastName) AS PosterName,
+        COUNT(DISTINCT A.AdID) AS RejectedAdCount
+    FROM
+        Person AS P
+        INNER JOIN Ad AS A ON P.PersonID = A.PosterID
+    WHERE A.AdStatus = 'Rejected'
+    GROUP BY P.PersonID, P.FirstName, P.LastName
+    HAVING COUNT(DISTINCT A.AdID) >= p_MinRejections;
+END$$
+
+DELIMITER ;
+
+CALL GetNoncompliantPosters(NULL);
 
 -- -------------------------------------------------------------------------------
 
--- Q14) Create a veiw to show ads per user type
+-- Q14) Procedure to find the rejection history of a user (poster)
+DROP PROCEDURE IF EXISTS GetPosterRejectionHistory;
+
+DELIMITER $$
+
+CREATE PROCEDURE GetPosterRejectionHistory (
+    IN p_PosterID INT
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = p_PosterID) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: No person exists with the given PersonID.';
+    END IF;
+
+    SELECT
+        A.AdID,
+        A.Title,
+        A.AdType,
+        CASE WHEN E.PersonID IS NOT NULL
+             THEN CONCAT(P.FirstName, ' ', P.LastName)
+             ELSE 'No reviewer on record'
+        END AS ReviewerName
+    FROM
+        Ad AS A
+        LEFT JOIN Employee AS E ON A.ReviewerID = E.PersonID
+        LEFT JOIN Person AS P ON E.PersonID = P.PersonID
+    WHERE
+        A.PosterID = p_PosterID
+        AND A.AdStatus = 'Rejected'
+    ORDER BY A.AdID;
+END$$
+
+DELIMITER ;
+
+CALL GetPosterRejectionHistory(18);
+
+-- -------------------------------------------------------------------------------
+
+-- Q15) Create a veiw to show ads per user type
 DROP VIEW IF EXISTS AdsByUserType;
 
 CREATE VIEW AdsByUserType AS
 SELECT 
     A.AdID,
     A.PosterID,
+    A.AdType,
     CASE 
-        WHEN A.PosterID IN (
-            SELECT S.PersonID 
-            FROM Student AS S) 
-        THEN 'Student'
-        WHEN A.PosterID IN (
-            SELECT E.PersonID 
-            FROM Employee AS E 
-            WHERE E.PositionTitle = 'Faculty') 
-        THEN 'Faculty'
-        WHEN A.PosterID IN (
-            SELECT E2.PersonID 
-            FROM Employee AS E2 
-            WHERE E2.PositionTitle <> 'Faculty') 
-        THEN 'Staff'
-        WHEN A.PosterID NOT IN (
-            SELECT CM.PersonID 
-            FROM CollegeMember AS CM) 
-        THEN 'Non-Member'
+        WHEN S.PersonID IS NOT NULL THEN 'Student'
+        WHEN E.PersonID IS NOT NULL THEN E.PositionTitle
+        WHEN CM.PersonID IS NOT NULL THEN 'College Member (Unspecialized)'
         ELSE 'Non-Member'
     END AS UserType
 FROM 
     Ad AS A
-    LEFT JOIN Person AS P ON A.PosterID = P.PersonID
     LEFT JOIN CollegeMember AS CM ON A.PosterID = CM.PersonID
     LEFT JOIN Employee AS E ON A.PosterID = E.PersonID
     LEFT JOIN Student AS S ON A.PosterID = S.PersonID;
@@ -336,23 +405,41 @@ ORDER BY UserType, PosterID;
 
 -- -------------------------------------------------------------------------------
 
--- Q15) Count ads per user type
-SELECT 
-    UserType,
-    COUNT(AdID) AS NumAds
+-- Q16) Pivot table of ads by user type x ad type
+DROP VIEW IF EXISTS vw_AdsByUserTypeAndAdType;
+
+CREATE VIEW vw_AdsByUserTypeAndAdType AS
+SELECT
+    IFNULL(UserType, 'Total') AS UserType,
+    SUM(CASE WHEN AdType = 'Tutorship' THEN 1 ELSE 0 END) AS Tutorship,
+    SUM(CASE WHEN AdType = 'Rent'      THEN 1 ELSE 0 END) AS Rent,
+    SUM(CASE WHEN AdType = 'Sale'      THEN 1 ELSE 0 END) AS Sale,
+    SUM(CASE WHEN AdType = 'Roommate'  THEN 1 ELSE 0 END) AS Roommate,
+    SUM(CASE WHEN AdType = 'Event'     THEN 1 ELSE 0 END) AS Event,
+    COUNT(*) AS RowTotal
 FROM AdsByUserType
-GROUP BY 
-    UserType;
+GROUP BY UserType WITH ROLLUP;
+
+SELECT * FROM vw_AdsByUserTypeAndAdType;
 
 -- -------------------------------------------------------------------------------
 
--- Q16) Count all ads by Ad Type
-SELECT 
-    AdType,
-    COUNT(AdID) AS AdCount
-FROM Ad
-GROUP BY
-    AdType;
+-- Q17) Create a view for the review queue
+DROP VIEW IF EXISTS vw_ReviewQueue;
+
+CREATE VIEW vw_ReviewQueue AS
+SELECT
+    A.AdID,
+    CONCAT(P.FirstName, ' ', P.LastName) AS PosterName,
+    A.Title,
+    A.AdType,
+    ROW_NUMBER() OVER (ORDER BY A.EnteredPending, A.AdID) AS QueuePosition
+FROM
+    Ad AS A
+    INNER JOIN Person AS P ON A.PosterID = P.PersonID
+WHERE A.AdStatus = 'Pending';
+
+SELECT * FROM vw_ReviewQueue;
 
 -- -------------------------------------------------------------------------------
 
@@ -366,7 +453,7 @@ CREATE PROCEDURE ReviewAd
     IN p_AdID INT,
     IN p_Status VARCHAR(10),
     IN p_ReviewerID INT,
-    IN p_PostDate DATE
+    IN p_ReviewDate DATE
 )
 BEGIN
     -- Validate status
@@ -388,37 +475,34 @@ BEGIN
     UPDATE Ad
     SET 
         AdStatus = p_Status,
-        PostDate = 
+        ReviewDate = 
             CASE
-                WHEN p_Status = 'Approved' THEN
-                    IFNULL(p_PostDate, CURDATE())
+                WHEN p_Status != 'Pending' THEN
+                    IFNULL(p_ReviewDate, CURDATE())
                 ELSE NULL
             END,
         ReviewerID = 
             CASE
-                WHEN p_Status = 'Pending' THEN NULL
-                ELSE p_ReviewerID
+                WHEN p_Status != 'Pending' THEN p_ReviewerID
+                ELSE NULL
             END
     WHERE AdID = p_AdID;
 END$$
 
 DELIMITER ;
 
--- DROP PROCEDURE ReviewAd;
 START TRANSACTION;
     CALL ReviewAd(16, 'Approved', 19, NULL);
 ROLLBACK;
 
-SELECT * FROM Ad WHERE AdID = 16;
-
 -- -------------------------------------------------------------------------------
 
--- Q18) Assign a reviewer
-DROP PROCEDURE IF EXISTS AssignReviewer;
+-- Q18) Set IsReviewer role for an employee
+DROP PROCEDURE IF EXISTS SetReviewerRole;
 
 DELIMITER $$
 
-CREATE PROCEDURE AssignReviewer
+CREATE PROCEDURE SetReviewerRole
 (
     IN p_EmpID INT,
     IN p_IsRev BIT
@@ -440,7 +524,7 @@ END$$
 DELIMITER ;
 
 START TRANSACTION;
-    CALL AssignReviewer(20, 1);
+    CALL SetReviewerRole(20, 1);
 ROLLBACK;
 -- ------------------------------------------------------------------------------
 
@@ -451,8 +535,10 @@ DROP PROCEDURE IF EXISTS PostAd;
 
 DELIMITER $$
 
-CREATE PROCEDURE PostAd
-(
+CREATE PROCEDURE PostAd (
+    -- This procedure must be called inside a transaction the CALLER controls
+    -- (START TRANSACTION ... COMMIT/ROLLBACK), so the lock below is held for
+    -- the full validate-then-insert sequence instead of just one statement.
     IN p_AdID INT,
     IN p_Bldg VARCHAR(4),
     IN p_Floor INT,
@@ -460,10 +546,13 @@ CREATE PROCEDURE PostAd
 )
 BEGIN
     -- check if AdID is valid: must be an approved ad
-    IF p_AdID IS NULL OR p_AdID NOT IN (
-        SELECT AdID
+    IF NOT EXISTS (
+        SELECT 1
         FROM Ad
-        WHERE AdStatus = 'Approved'
+        WHERE 
+            AdStatus = 'Approved'
+            AND AdID = p_AdID
+        FOR UPDATE
     ) THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Error: Ad is not approved.';
@@ -494,6 +583,18 @@ END$$
 
 DELIMITER ;
 
+-- Posted ad should pass
+START TRANSACTION;
+    CALL ReviewAd(16, 'Approved', 19, NULL);
+    CALL PostAd(16, 'LIB', 1, 'A');
+ROLLBACK;
+
+-- Posted ad should fail - ad not approved
+START TRANSACTION;
+    CALL PostAd(16, 'LIB', 1, 'A');
+ROLLBACK;
+
+
 -- -------------------------------------------------------------------------------
 
 -- Q20) Show Contact information of poster of a given ad
@@ -506,12 +607,17 @@ CREATE PROCEDURE GetPosterInfo
     IN p_AdID INT
 )
 BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Ad WHERE AdID = p_AdID) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: No ad exists with the given AdID.';
+    END IF;
+
     SELECT 
         CONCAT(P.FirstName, ' ', P.LastName) AS PosterName,
         P.Email,
         P.Phone,
-        A.AdID,
         A.Title,
+        A.AdType,
         CASE WHEN CM.PersonID IS NOT NULL THEN 'Yes' ELSE 'No' END AS IsCollegeMember,
         COALESCE (CM.Department, 'N/A') AS Department,
         CASE WHEN S.PersonID IS NOT NULL THEN 'Yes' ELSE 'No' END AS IsStudent,
@@ -519,7 +625,7 @@ BEGIN
             WHEN S.PersonID IS NOT NULL THEN COALESCE(S.Major, 'Undeclared')
             ELSE 'N/A'
         END AS Major,
-        A.AdType
+        A.AdID
     FROM 
         Person AS P
         INNER JOIN Ad AS A 
@@ -537,10 +643,121 @@ CALL GetPosterInfo(1);
 
 -- -------------------------------------------------------------------------------
 
--- Q21) Delete posted ads that are expired
+-- Q21) Show Contact information of the reviewer of a given ad
+DROP PROCEDURE IF EXISTS GetReviewerInfo;
+
+DELIMITER $$
+
+CREATE PROCEDURE GetReviewerInfo
+(
+    IN p_AdID INT
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Ad WHERE AdID = p_AdID) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: No ad exists with the given AdID.';
+    END IF;
+
+    SELECT
+        A.Title,
+        A.AdType,
+        A.AdStatus,
+        CASE WHEN E.PersonID IS NOT NULL 
+             THEN CONCAT(P.FirstName, ' ', P.LastName) 
+             ELSE 'No reviewer on record' 
+        END AS ReviewerName,
+        P.Email,
+        P.Phone,
+        E.OfficeLocation,
+        E.Extension,
+        E.PositionTitle
+    FROM
+        Ad AS A
+        LEFT JOIN Employee AS E ON A.ReviewerID = E.PersonID
+        LEFT JOIN Person AS P ON E.PersonID = P.PersonID
+    WHERE A.AdID = p_AdID;
+END$$
+
+DELIMITER ;
+
+CALL GetReviewerInfo(4);
+
+-- -------------------------------------------------------------------------------
+
+-- Q22) Delete posted ads that are expired
 START TRANSACTION;
     DELETE APB
     FROM Ad_Posted_Board AS APB
     JOIN vw_ExpiredAds AS EA ON APB.AdID = EA.AdID;
 ROLLBACK;
 
+-- -------------------------------------------------------------------------------
+
+-- Q23) Find posted ads that are not approved (possible if a posted ad goes through
+--      a re-review)
+DROP VIEW IF EXISTS vw_UnapprovedPostings;
+
+CREATE VIEW vw_UnapprovedPostings AS
+SELECT
+    Building,
+    BldgFloor,
+    Slot,
+    AdID,
+    Title,
+    AdStatus,
+    ReviewDate
+FROM PostedAdsInfo
+WHERE AdStatus <> 'Approved';
+
+-- -------------------------------------------------------------------------------
+
+-- Q24) Remove an unapproved ad from the Ad_Posted_Board table.
+--      If a specific board is given, it will only remove the ad from that board,
+--      otherwise it will remove it from all boards it is currently on.
+DROP PROCEDURE IF EXISTS UnpostAd;
+
+DELIMITER $$
+
+CREATE PROCEDURE UnpostAd (
+    IN p_AdID      INT,
+    IN p_Building  VARCHAR(4),
+    IN p_BldgFloor INT,
+    IN p_Slot      CHAR(1)
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Ad WHERE AdID = p_AdID) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: No ad exists with the given AdID.';
+    END IF;
+
+    IF (p_Building IS NOT NULL OR p_BldgFloor IS NOT NULL OR p_Slot IS NOT NULL)
+       AND (p_Building IS NULL OR p_BldgFloor IS NULL OR p_Slot IS NULL) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: Building, BldgFloor, and Slot must all be supplied together, or all omitted to remove every posting.';
+    END IF;
+
+    IF p_Building IS NULL THEN
+        IF NOT EXISTS (SELECT 1 FROM Ad_Posted_Board WHERE AdID = p_AdID) THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Error: This ad is not currently posted to any board.';
+        END IF;
+        DELETE FROM Ad_Posted_Board WHERE AdID = p_AdID;
+    ELSE
+        IF NOT EXISTS (
+            SELECT 1 FROM Ad_Posted_Board 
+            WHERE AdID = p_AdID AND Building = p_Building 
+              AND BldgFloor = p_BldgFloor AND Slot = p_Slot
+        ) THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Error: This ad is not currently posted to the given board.';
+        END IF;
+        DELETE FROM Ad_Posted_Board 
+        WHERE AdID = p_AdID AND Building = p_Building 
+          AND BldgFloor = p_BldgFloor AND Slot = p_Slot;
+    END IF;
+END$$
+
+DELIMITER ;
+
+-- CALL UnpostAd(7, NULL, NULL, NULL);
+-- CALL UnpostAd(7, 'BLD', 1, 'A');
