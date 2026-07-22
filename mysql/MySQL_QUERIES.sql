@@ -1485,3 +1485,94 @@ ROLLBACK;
 START TRANSACTION;
     CALL WithdrawAd(1, 999, @BadWithdraw);
 ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- Q40) Add a new board. The only real constraint is that the location
+--      (Building, BldgFloor, Slot) not already be in use.
+DROP PROCEDURE IF EXISTS NewBoard;
+
+DELIMITER $$
+
+CREATE PROCEDURE NewBoard (
+    IN p_Building    VARCHAR(4),
+    IN p_BldgFloor   INT,
+    IN p_Slot        CHAR(1),
+    IN p_BoardLength INT,
+    IN p_BoardWidth  INT
+)
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM Board
+        WHERE Building = p_Building AND BldgFloor = p_BldgFloor AND Slot = p_Slot
+    ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: A board already exists at the given location.';
+    END IF;
+
+    IF p_BoardLength IS NULL OR p_BoardLength <= 0 OR p_BoardWidth IS NULL OR p_BoardWidth <= 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Board length and width must both be positive.';
+    END IF;
+
+    INSERT INTO Board (Building, BldgFloor, Slot, BoardLength, BoardWidth)
+    VALUES (p_Building, p_BldgFloor, p_Slot, p_BoardLength, p_BoardWidth);
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Q41) Retire (permanently remove) a board. Refuses if any ad is currently
+--      posted there -- fk_adpostedboard_board uses ON DELETE CASCADE, which
+--      would otherwise silently remove those postings. Clear the board with
+--      UnpostAd first. Hard delete: a board's identity is just its physical
+--      location, and there's no history worth preserving once it's gone,
+--      unlike the flag used for Ad withdrawal.
+--      This procedure must be called inside a transaction the CALLER controls.
+DROP PROCEDURE IF EXISTS RetireBoard;
+
+DELIMITER $$
+
+CREATE PROCEDURE RetireBoard (
+    IN p_Building  VARCHAR(4),
+    IN p_BldgFloor INT,
+    IN p_Slot      CHAR(1)
+)
+BEGIN
+    DECLARE v_PostedCount INT;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM Board
+        WHERE Building = p_Building AND BldgFloor = p_BldgFloor AND Slot = p_Slot
+    ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No board exists at the given location.';
+    END IF;
+
+    SELECT COUNT(*) INTO v_PostedCount
+    FROM Ad_Posted_Board
+    WHERE Building = p_Building AND BldgFloor = p_BldgFloor AND Slot = p_Slot;
+
+    IF v_PostedCount > 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This board still has ad(s) posted to it. Unpost them first.';
+    END IF;
+
+    DELETE FROM Board
+    WHERE Building = p_Building AND BldgFloor = p_BldgFloor AND Slot = p_Slot;
+END$$
+
+DELIMITER ;
+
+-- Should succeed - fresh board
+START TRANSACTION;
+    CALL NewBoard('SCI', 1, 'A', 2200, 1600);
+    SELECT * FROM Board WHERE Building = 'SCI';
+ROLLBACK;
+
+-- Should fail - duplicate location
+START TRANSACTION;
+    CALL NewBoard('BLD', 1, 'A', 2000, 1500);
+ROLLBACK;
+
+-- Should fail - board still populated
+START TRANSACTION;
+    CALL RetireBoard('BLD', 1, 'A');
+ROLLBACK;

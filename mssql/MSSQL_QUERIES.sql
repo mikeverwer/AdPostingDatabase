@@ -1492,3 +1492,99 @@ BEGIN TRANSACTION;
     DECLARE @BadWithdraw INT;
     EXEC WithdrawAd @_AdID = 1, @_PosterID = 999, @_DeletedMessageCount = @BadWithdraw OUTPUT;
 ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q40) Add a new board. The only real constraint is that the location
+--      (Building, BldgFloor, Slot) not already be in use.
+CREATE OR ALTER PROCEDURE NewBoard
+    @_Building    VARCHAR(4),
+    @_BldgFloor   INT,
+    @_Slot        CHAR(1),
+    @_BoardLength INT,
+    @_BoardWidth  INT
+AS
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM Board
+        WHERE Building = @_Building AND BldgFloor = @_BldgFloor AND Slot = @_Slot
+    )
+    BEGIN
+        RAISERROR('Error: A board already exists at the given location.', 16, 1);
+        RETURN;
+    END
+
+    IF @_BoardLength IS NULL OR @_BoardLength <= 0 OR @_BoardWidth IS NULL OR @_BoardWidth <= 0
+    BEGIN
+        RAISERROR('Error: Board length and width must both be positive.', 16, 1);
+        RETURN;
+    END
+
+    INSERT INTO Board (Building, BldgFloor, Slot, BoardLength, BoardWidth)
+    VALUES (@_Building, @_BldgFloor, @_Slot, @_BoardLength, @_BoardWidth);
+END
+GO
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q41) Retire (permanently remove) a board. Refuses if any ad is currently
+--      posted there -- fk_adpostedboard_board is ON DELETE CASCADE, which
+--      would otherwise silently remove those postings, exactly the kind of
+--      invisible physical-world side effect UnpostAd exists to make explicit.
+--      Clear the board with UnpostAd (per-ad, or looped by the caller) first.
+--      A board's identity is just its physical location; unlike Ad, there is
+--      no history worth preserving once it is gone, so this is a hard delete
+--      rather than a flag.
+--      This procedure must be called inside a transaction the CALLER controls.
+CREATE OR ALTER PROCEDURE RetireBoard
+    @_Building  VARCHAR(4),
+    @_BldgFloor INT,
+    @_Slot      CHAR(1)
+AS
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM Board
+        WHERE Building = @_Building AND BldgFloor = @_BldgFloor AND Slot = @_Slot
+    )
+    BEGIN
+        RAISERROR('Error: No board exists at the given location.', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @PostedCount INT;
+    SELECT @PostedCount = COUNT(*)
+    FROM Ad_Posted_Board
+    WHERE Building = @_Building AND BldgFloor = @_BldgFloor AND Slot = @_Slot;
+
+    IF @PostedCount > 0
+    BEGIN
+        RAISERROR('Error: This board still has %d ad(s) posted to it. Unpost them first.', 16, 1, @PostedCount);
+        RETURN;
+    END
+
+    DELETE FROM Board
+    WHERE Building = @_Building AND BldgFloor = @_BldgFloor AND Slot = @_Slot;
+END
+GO
+
+-- Should succeed - fresh board
+BEGIN TRANSACTION;
+    EXEC NewBoard @_Building = 'SCI', @_BldgFloor = 1, @_Slot = 'A', @_BoardLength = 2200, @_BoardWidth = 1600;
+    SELECT * FROM Board WHERE Building = 'SCI';
+ROLLBACK TRANSACTION;
+
+-- Should fail - duplicate location
+BEGIN TRANSACTION;
+    EXEC NewBoard @_Building = 'BLD', @_BldgFloor = 1, @_Slot = 'A', @_BoardLength = 2000, @_BoardWidth = 1500;
+ROLLBACK TRANSACTION;
+
+-- Should fail - board still populated
+BEGIN TRANSACTION;
+    EXEC RetireBoard @_Building = 'BLD', @_BldgFloor = 1, @_Slot = 'A';
+ROLLBACK TRANSACTION;
+
+-- Should succeed - clear the board first, then retire it
+BEGIN TRANSACTION;
+    EXEC UnpostAd @_AdID = 1, @_Building = 'BLD', @_BldgFloor = 1, @_Slot = 'A';
+    -- (repeat for every AdID still posted to this board, or loop from the caller)
+ROLLBACK TRANSACTION;
