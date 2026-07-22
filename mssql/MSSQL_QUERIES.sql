@@ -657,6 +657,9 @@ SELECT
 FROM PostedAdsInfo
 WHERE AdStatus <> 'Approved';
 
+GO
+SELECT * FROM vw_UnapprovedPostings;
+
 -- -------------------------------------------------------------------------------
 GO
 -- Q24) Remove an unapproved ad from the Ad_Posted_Board table.
@@ -712,3 +715,222 @@ GO
 -- EXEC UnpostAd @_AdID = 7;                                    -- remove from every board
 -- EXEC UnpostAd @_AdID = 7, @_Building = 'BLD', @_BldgFloor = 1, @_Slot = 'A';  -- one board only
 
+-- -------------------------------------------------------------------------------
+GO
+-- Q25) Add a person with no college affiliation.
+--      Inserts into Person only. Use for members of the public who post ads
+--      (see the non-member posters in the seed data).
+--      This procedure must be called inside a transaction the CALLER controls
+--      (BEGIN TRANSACTION ... COMMIT/ROLLBACK).
+CREATE OR ALTER PROCEDURE AddNonMember
+    @_FirstName VARCHAR(50),
+    @_LastName  VARCHAR(50),
+    @_Phone     CHAR(10)    = NULL,
+    @_Email     VARCHAR(50),
+    @_PersonID  INT         = NULL OUTPUT
+AS
+BEGIN
+    IF @_FirstName IS NULL OR LTRIM(RTRIM(@_FirstName)) = ''
+       OR @_LastName IS NULL OR LTRIM(RTRIM(@_LastName)) = ''
+    BEGIN
+        RAISERROR('Error: First and last name are required.', 16, 1);
+        RETURN;
+    END
+
+    IF @_Email IS NULL OR LTRIM(RTRIM(@_Email)) = ''
+    BEGIN
+        RAISERROR('Error: Email is required.', 16, 1);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM Person WHERE Email = @_Email)
+    BEGIN
+        RAISERROR('Error: A person with the given email already exists.', 16, 1);
+        RETURN;
+    END
+
+    INSERT INTO Person (FirstName, LastName, Phone, Email)
+    VALUES (@_FirstName, @_LastName, @_Phone, @_Email);
+
+    SET @_PersonID = SCOPE_IDENTITY();
+END
+GO
+
+BEGIN TRANSACTION;
+    DECLARE @NewNonMember INT;
+    EXEC AddNonMember
+        @_FirstName = 'Dana', @_LastName = 'Whitfield',
+        @_Phone = '5551239001', @_Email = 'dana.whitfield@email.com',
+        @_PersonID = @NewNonMember OUTPUT;
+    SELECT @NewNonMember AS NewPersonID;
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q26) Add a college member who is neither a student nor an employee.
+--      Intended for people who retain a college ID and board privileges without
+--      being enrolled or employed; alumni are the motivating case. Most
+--      registrations should use AddStudent or AddEmployee instead, both of which
+--      create the CollegeMember row themselves.
+--      This procedure must be called inside a transaction the CALLER controls.
+CREATE OR ALTER PROCEDURE AddCollegeMember
+    @_FirstName  VARCHAR(50),
+    @_LastName   VARCHAR(50),
+    @_Phone      CHAR(10)    = NULL,
+    @_Email      VARCHAR(50),
+    @_CollegeID  CHAR(9),
+    @_Department VARCHAR(50) = NULL,
+    @_PersonID   INT         = NULL OUTPUT
+AS
+BEGIN
+    IF @_CollegeID IS NULL OR LTRIM(RTRIM(@_CollegeID)) = ''
+    BEGIN
+        RAISERROR('Error: College ID is required.', 16, 1);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM CollegeMember WHERE CollegeID = @_CollegeID)
+    BEGIN
+        RAISERROR('Error: A college member with the given College ID already exists.', 16, 1);
+        RETURN;
+    END
+
+    EXEC AddNonMember
+        @_FirstName = @_FirstName, @_LastName = @_LastName,
+        @_Phone     = @_Phone,     @_Email    = @_Email,
+        @_PersonID  = @_PersonID OUTPUT;
+
+    IF @_PersonID IS NULL RETURN;  -- AddNonMember raised and returned
+
+    INSERT INTO CollegeMember (PersonID, CollegeID, Department)
+    VALUES (@_PersonID, @_CollegeID, @_Department);
+END
+GO
+
+BEGIN TRANSACTION;
+    DECLARE @NewMember INT;
+    EXEC AddCollegeMember
+        @_FirstName = 'Alan', @_LastName = 'Brouwer',
+        @_Phone = '5551239002', @_Email = 'alan.brouwer@college.edu',
+        @_CollegeID = 'ALM000001', @_Department = 'Alumni Relations',
+        @_PersonID = @NewMember OUTPUT;
+    SELECT @NewMember AS NewPersonID;
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q27) Add a student. Inserts Person, CollegeMember, and Student.
+--      Department (the student's academic department) and Major are both supplied
+--      by the caller; they are related but distinct, and Major may be NULL for a
+--      student who has not declared one.
+--      This procedure must be called inside a transaction the CALLER controls.
+CREATE OR ALTER PROCEDURE AddStudent
+    @_FirstName  VARCHAR(50),
+    @_LastName   VARCHAR(50),
+    @_Phone      CHAR(10)    = NULL,
+    @_Email      VARCHAR(50),
+    @_CollegeID  CHAR(9),
+    @_Department VARCHAR(50) = NULL,
+    @_Major      VARCHAR(60) = NULL,
+    @_PersonID   INT         = NULL OUTPUT
+AS
+BEGIN
+    EXEC AddCollegeMember
+        @_FirstName  = @_FirstName,  @_LastName   = @_LastName,
+        @_Phone      = @_Phone,      @_Email      = @_Email,
+        @_CollegeID  = @_CollegeID,  @_Department = @_Department,
+        @_PersonID   = @_PersonID OUTPUT;
+
+    IF @_PersonID IS NULL RETURN;  -- a nested procedure raised and returned
+
+    INSERT INTO Student (PersonID, Major)
+    VALUES (@_PersonID, @_Major);
+END
+GO
+
+BEGIN TRANSACTION;
+    DECLARE @NewStudent INT;
+    EXEC AddStudent
+        @_FirstName = 'Rosa', @_LastName = 'Iqbal',
+        @_Phone = '5551239003', @_Email = 'rosa.iqbal@college.edu',
+        @_CollegeID = 'STU000018', @_Department = 'Mathematics',
+        @_Major = 'Applied Mathematics',
+        @_PersonID = @NewStudent OUTPUT;
+    SELECT @NewStudent AS NewPersonID;
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q28) Add an employee. Inserts Person, CollegeMember, and Employee.
+--      Extension requires OfficeLocation (chk_employee_extension_requires_office);
+--      an employee with no office must have both NULL.
+--      This procedure must be called inside a transaction the CALLER controls.
+CREATE OR ALTER PROCEDURE AddEmployee
+    @_FirstName      VARCHAR(50),
+    @_LastName       VARCHAR(50),
+    @_Phone          CHAR(10)    = NULL,
+    @_Email          VARCHAR(50),
+    @_CollegeID      CHAR(9),
+    @_Department     VARCHAR(50) = NULL,
+    @_OfficeLocation VARCHAR(15) = NULL,
+    @_Extension      VARCHAR(6)  = NULL,
+    @_PositionTitle  VARCHAR(20),
+    @_IsReviewer     BIT         = 0,
+    @_PersonID       INT         = NULL OUTPUT
+AS
+BEGIN
+    IF @_PositionTitle NOT IN ('Faculty', 'Administration', 'Staff', 'Support', 'Specialized')
+    BEGIN
+        RAISERROR('Error: Invalid position title. Allowed values are Faculty, Administration, Staff, Support, or Specialized.', 16, 1);
+        RETURN;
+    END
+
+    IF @_Extension IS NOT NULL AND @_OfficeLocation IS NULL
+    BEGIN
+        RAISERROR('Error: An extension cannot be assigned without an office location.', 16, 1);
+        RETURN;
+    END
+
+    EXEC AddCollegeMember
+        @_FirstName  = @_FirstName,  @_LastName   = @_LastName,
+        @_Phone      = @_Phone,      @_Email      = @_Email,
+        @_CollegeID  = @_CollegeID,  @_Department = @_Department,
+        @_PersonID   = @_PersonID OUTPUT;
+
+    IF @_PersonID IS NULL RETURN;  -- a nested procedure raised and returned
+
+    INSERT INTO Employee (PersonID, OfficeLocation, Extension, PositionTitle, IsReviewer)
+    VALUES (@_PersonID, @_OfficeLocation, @_Extension, @_PositionTitle, @_IsReviewer);
+END
+GO
+
+BEGIN TRANSACTION;
+    DECLARE @NewEmployee INT;
+    EXEC AddEmployee
+        @_FirstName = 'Yusuf', @_LastName = 'Demir',
+        @_Phone = '5551239004', @_Email = 'yusuf.demir@college.edu',
+        @_CollegeID = 'EMP000012', @_Department = 'Chemistry',
+        @_OfficeLocation = 'SCI-215', @_Extension = '7215',
+        @_PositionTitle = 'Faculty', @_IsReviewer = 0,
+        @_PersonID = @NewEmployee OUTPUT;
+    SELECT @NewEmployee AS NewPersonID;
+ROLLBACK TRANSACTION;
+
+-- Should fail - extension without an office
+BEGIN TRANSACTION;
+    DECLARE @BadEmployee INT;
+    EXEC AddEmployee
+        @_FirstName = 'Test', @_LastName = 'Case',
+        @_Email = 'test.case@college.edu', @_CollegeID = 'EMP000013',
+        @_Extension = '9999', @_PositionTitle = 'Support',
+        @_PersonID = @BadEmployee OUTPUT;
+ROLLBACK TRANSACTION;
+
+-- Should fail - duplicate email
+BEGIN TRANSACTION;
+    DECLARE @DupEmail INT;
+    EXEC AddStudent
+        @_FirstName = 'Duplicate', @_LastName = 'Email',
+        @_Email = 'emma.johnson@college.edu', @_CollegeID = 'STU000019',
+        @_PersonID = @DupEmail OUTPUT;
+ROLLBACK TRANSACTION;

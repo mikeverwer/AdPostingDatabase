@@ -498,11 +498,11 @@ ROLLBACK;
 -- -------------------------------------------------------------------------------
 
 -- Q18) Set IsReviewer role for an employee
-DROP PROCEDURE IF EXISTS SetReviewerRole;
+DROP PROCEDURE IF EXISTS SetReviewerPermission;
 
 DELIMITER $$
 
-CREATE PROCEDURE SetReviewerRole
+CREATE PROCEDURE SetReviewerPermission
 (
     IN p_EmpID INT,
     IN p_IsRev BIT
@@ -524,7 +524,7 @@ END$$
 DELIMITER ;
 
 START TRANSACTION;
-    CALL SetReviewerRole(20, 1);
+    CALL SetReviewerPermission(20, 1);
 ROLLBACK;
 -- ------------------------------------------------------------------------------
 
@@ -761,3 +761,413 @@ DELIMITER ;
 
 -- CALL UnpostAd(7, NULL, NULL, NULL);
 -- CALL UnpostAd(7, 'BLD', 1, 'A');
+
+-- -------------------------------------------------------------------------------
+
+-- Q25) Add a person with no college affiliation.
+--      Inserts into Person only. Use for members of the public who post ads.
+--      This procedure must be called inside a transaction the CALLER controls
+--      (START TRANSACTION ... COMMIT/ROLLBACK).
+DROP PROCEDURE IF EXISTS AddNonMember;
+
+DELIMITER $$
+
+CREATE PROCEDURE AddNonMember (
+    IN  p_FirstName VARCHAR(50),
+    IN  p_LastName  VARCHAR(50),
+    IN  p_Phone     CHAR(10),
+    IN  p_Email     VARCHAR(50),
+    OUT p_PersonID  INT
+)
+BEGIN
+    SET p_PersonID = NULL;
+
+    IF p_FirstName IS NULL OR TRIM(p_FirstName) = ''
+       OR p_LastName IS NULL OR TRIM(p_LastName) = '' THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: First and last name are required.';
+    END IF;
+
+    IF p_Email IS NULL OR TRIM(p_Email) = '' THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: Email is required.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM Person WHERE Email = p_Email) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: A person with the given email already exists.';
+    END IF;
+
+    INSERT INTO Person (FirstName, LastName, Phone, Email)
+    VALUES (p_FirstName, p_LastName, p_Phone, p_Email);
+
+    SET p_PersonID = LAST_INSERT_ID();
+END$$
+
+DELIMITER ;
+
+START TRANSACTION;
+    CALL AddNonMember('Dana', 'Whitfield', '5551239001', 'dana.whitfield@email.com', @NewNonMember);
+    SELECT @NewNonMember AS NewPersonID;
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- Q26) Add a college member who is neither a student nor an employee.
+--      Intended for people who retain a college ID and board privileges without
+--      being enrolled or employed; alumni are the motivating case. Most
+--      registrations should use AddStudent or AddEmployee instead, both of which
+--      create the CollegeMember row themselves.
+--      This procedure must be called inside a transaction the CALLER controls.
+DROP PROCEDURE IF EXISTS AddCollegeMember;
+
+DELIMITER $$
+
+CREATE PROCEDURE AddCollegeMember (
+    IN  p_FirstName  VARCHAR(50),
+    IN  p_LastName   VARCHAR(50),
+    IN  p_Phone      CHAR(10),
+    IN  p_Email      VARCHAR(50),
+    IN  p_CollegeID  CHAR(9),
+    IN  p_Department VARCHAR(50),
+    OUT p_PersonID   INT
+)
+BEGIN
+    SET p_PersonID = NULL;
+
+    IF p_CollegeID IS NULL OR TRIM(p_CollegeID) = '' THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: College ID is required.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM CollegeMember WHERE CollegeID = p_CollegeID) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: A college member with the given College ID already exists.';
+    END IF;
+
+    CALL AddNonMember(p_FirstName, p_LastName, p_Phone, p_Email, p_PersonID);
+
+    INSERT INTO CollegeMember (PersonID, CollegeID, Department)
+    VALUES (p_PersonID, p_CollegeID, p_Department);
+END$$
+
+DELIMITER ;
+
+START TRANSACTION;
+    CALL AddCollegeMember('Alan', 'Brouwer', '5551239002', 'alan.brouwer@college.edu',
+                          'ALM000001', 'Alumni Relations', @NewMember);
+    SELECT @NewMember AS NewPersonID;
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- Q27) Add a student. Inserts Person, CollegeMember, and Student.
+--      Department (the student's academic department) and Major are both supplied
+--      by the caller; they are related but distinct, and Major may be NULL for a
+--      student who has not declared one.
+--      This procedure must be called inside a transaction the CALLER controls.
+DROP PROCEDURE IF EXISTS AddStudent;
+
+DELIMITER $$
+
+CREATE PROCEDURE AddStudent (
+    IN  p_FirstName  VARCHAR(50),
+    IN  p_LastName   VARCHAR(50),
+    IN  p_Phone      CHAR(10),
+    IN  p_Email      VARCHAR(50),
+    IN  p_CollegeID  CHAR(9),
+    IN  p_Department VARCHAR(50),
+    IN  p_Major      VARCHAR(60),
+    OUT p_PersonID   INT
+)
+BEGIN
+    SET p_PersonID = NULL;
+
+    CALL AddCollegeMember(p_FirstName, p_LastName, p_Phone, p_Email,
+                          p_CollegeID, p_Department, p_PersonID);
+
+    INSERT INTO Student (PersonID, Major)
+    VALUES (p_PersonID, p_Major);
+END$$
+
+DELIMITER ;
+
+START TRANSACTION;
+    CALL AddStudent('Rosa', 'Iqbal', '5551239003', 'rosa.iqbal@college.edu',
+                    'STU000018', 'Mathematics', 'Applied Mathematics', @NewStudent);
+    SELECT @NewStudent AS NewPersonID;
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- Q28) Add an employee. Inserts Person, CollegeMember, and Employee.
+--      Extension requires OfficeLocation (chk_employee_extension_requires_office);
+--      an employee with no office must have both NULL.
+--      This procedure must be called inside a transaction the CALLER controls.
+DROP PROCEDURE IF EXISTS AddEmployee;
+
+DELIMITER $$
+
+CREATE PROCEDURE AddEmployee (
+    IN  p_FirstName      VARCHAR(50),
+    IN  p_LastName       VARCHAR(50),
+    IN  p_Phone          CHAR(10),
+    IN  p_Email          VARCHAR(50),
+    IN  p_CollegeID      CHAR(9),
+    IN  p_Department     VARCHAR(50),
+    IN  p_OfficeLocation VARCHAR(15),
+    IN  p_Extension      VARCHAR(6),
+    IN  p_PositionTitle  VARCHAR(20),
+    IN  p_IsReviewer     BIT,
+    OUT p_PersonID       INT
+)
+BEGIN
+    SET p_PersonID = NULL;
+
+    IF p_PositionTitle NOT IN ('Faculty', 'Administration', 'Staff', 'Support', 'Specialized') THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: Invalid position title. Allowed values are Faculty, Administration, Staff, Support, or Specialized.';
+    END IF;
+
+    IF p_Extension IS NOT NULL AND p_OfficeLocation IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: An extension cannot be assigned without an office location.';
+    END IF;
+
+    CALL AddCollegeMember(p_FirstName, p_LastName, p_Phone, p_Email,
+                          p_CollegeID, p_Department, p_PersonID);
+
+    INSERT INTO Employee (PersonID, OfficeLocation, Extension, PositionTitle, IsReviewer)
+    VALUES (p_PersonID, p_OfficeLocation, p_Extension, p_PositionTitle, IFNULL(p_IsReviewer, 0));
+END$$
+
+DELIMITER ;
+
+START TRANSACTION;
+    CALL AddEmployee('Yusuf', 'Demir', '5551239004', 'yusuf.demir@college.edu',
+                     'EMP000012', 'Chemistry', 'SCI-215', '7215', 'Faculty', 0, @NewEmployee);
+    SELECT @NewEmployee AS NewPersonID;
+ROLLBACK;
+
+-- Should fail - extension without an office
+START TRANSACTION;
+    CALL AddEmployee('Test', 'Case', NULL, 'test.case@college.edu',
+                     'EMP000013', NULL, NULL, '9999', 'Support', 0, @BadEmployee);
+ROLLBACK;
+
+-- Should fail - duplicate email
+START TRANSACTION;
+    CALL AddStudent('Duplicate', 'Email', NULL, 'emma.johnson@college.edu',
+                    'STU000019', NULL, NULL, @DupEmail);
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- Q29) Grant a person College Member status (Person -> CollegeMember).
+--      Requires the person already exist in Person and not already be a
+--      College Member. Use for someone gaining a College ID without yet
+--      being a Student or Employee (e.g. an alum retaining board privileges).
+DROP PROCEDURE IF EXISTS GrantCollegeMemberRole;
+
+DELIMITER $$
+
+CREATE PROCEDURE GrantCollegeMemberRole (
+    IN p_PersonID   INT,
+    IN p_CollegeID  CHAR(9),
+    IN p_Department VARCHAR(50)
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No person exists with the given PersonID.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM CollegeMember WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person already holds College Member status.';
+    END IF;
+
+    IF p_CollegeID IS NULL OR TRIM(p_CollegeID) = '' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: College ID is required.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM CollegeMember WHERE CollegeID = p_CollegeID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: A college member with the given College ID already exists.';
+    END IF;
+
+    INSERT INTO CollegeMember (PersonID, CollegeID, Department)
+    VALUES (p_PersonID, p_CollegeID, p_Department);
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Q30) Revoke College Member status (deletes the CollegeMember row).
+--      Refuses if the person still holds Student or Employee status, since
+--      both are structurally dependent on CollegeMember. Revoke those first.
+DROP PROCEDURE IF EXISTS RevokeCollegeMemberRole;
+
+DELIMITER $$
+
+CREATE PROCEDURE RevokeCollegeMemberRole (
+    IN p_PersonID INT
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM CollegeMember WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person does not currently hold College Member status.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM Student WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person still holds Student status. Revoke it first.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM Employee WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person still holds Employee status. Revoke it first.';
+    END IF;
+
+    DELETE FROM CollegeMember WHERE PersonID = p_PersonID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Q31) Grant a person Student status (CollegeMember -> Student).
+--      Requires the person already hold College Member status. Does not
+--      check Employee status either way, so this is also how a person who
+--      already holds Employee status becomes a dual Student/Employee (e.g.
+--      a graduate student TA).
+DROP PROCEDURE IF EXISTS GrantStudentRole;
+
+DELIMITER $$
+
+CREATE PROCEDURE GrantStudentRole (
+    IN p_PersonID INT,
+    IN p_Major    VARCHAR(60)
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM CollegeMember WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person must hold College Member status before being granted Student status.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM Student WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person already holds Student status.';
+    END IF;
+
+    INSERT INTO Student (PersonID, Major)
+    VALUES (p_PersonID, p_Major);
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Q32) Revoke Student status (deletes the Student row only; College Member
+--      and, if held, Employee status are untouched).
+DROP PROCEDURE IF EXISTS RevokeStudentRole;
+
+DELIMITER $$
+
+CREATE PROCEDURE RevokeStudentRole (
+    IN p_PersonID INT
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Student WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person does not currently hold Student status.';
+    END IF;
+
+    DELETE FROM Student WHERE PersonID = p_PersonID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Q33) Grant a person Employee status (CollegeMember -> Employee).
+--      Requires the person already hold College Member status. Does not
+--      check Student status either way, so this is also how an existing
+--      Student becomes a dual Student/Employee (e.g. a graduate student TA).
+--      Extension requires OfficeLocation. Not to be confused with
+--      SetReviewerPermission, which only flips the IsReviewer flag on an
+--      Employee row that already exists.
+DROP PROCEDURE IF EXISTS GrantEmployeeRole;
+
+DELIMITER $$
+
+CREATE PROCEDURE GrantEmployeeRole (
+    IN p_PersonID       INT,
+    IN p_OfficeLocation VARCHAR(15),
+    IN p_Extension      VARCHAR(6),
+    IN p_PositionTitle  VARCHAR(20),
+    IN p_IsReviewer     BIT
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM CollegeMember WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person must hold College Member status before being granted Employee status.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM Employee WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person already holds Employee status.';
+    END IF;
+
+    IF p_PositionTitle NOT IN ('Faculty', 'Administration', 'Staff', 'Support', 'Specialized') THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Invalid position title. Allowed values are Faculty, Administration, Staff, Support, or Specialized.';
+    END IF;
+
+    IF p_Extension IS NOT NULL AND p_OfficeLocation IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: An extension cannot be assigned without an office location.';
+    END IF;
+
+    INSERT INTO Employee (PersonID, OfficeLocation, Extension, PositionTitle, IsReviewer)
+    VALUES (p_PersonID, p_OfficeLocation, p_Extension, p_PositionTitle, IFNULL(p_IsReviewer, 0));
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Q34) Revoke Employee status. Any ad this person has reviewed has its
+--      ReviewerID explicitly cleared first (review history is preserved,
+--      matching vw_ReviewCountsPerReviewer's existing handling of deleted
+--      reviewers), then the Employee row is deleted. College Member and,
+--      if held, Student status are untouched.
+--      Not to be confused with SetReviewerPermission, which only flips the
+--      IsReviewer flag; this removes the Employee row entirely.
+DROP PROCEDURE IF EXISTS RevokeEmployeeRole;
+
+DELIMITER $$
+
+CREATE PROCEDURE RevokeEmployeeRole (
+    IN p_PersonID INT
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Employee WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person does not currently hold Employee status.';
+    END IF;
+
+    UPDATE Ad SET ReviewerID = NULL WHERE ReviewerID = p_PersonID;
+
+    DELETE FROM Employee WHERE PersonID = p_PersonID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+-- Demonstrates a graduate student TA: Priya Nair (PersonID 21, a Student) is
+-- granted Employee status without giving up Student status.
+START TRANSACTION;
+    CALL GrantEmployeeRole(21, 'MTH-110', '7110', 'Staff', 0);
+    SELECT * FROM Student WHERE PersonID = 21;
+    SELECT * FROM Employee WHERE PersonID = 21;
+ROLLBACK;
+
+-- Should fail - RevokeCollegeMemberRole refuses while Student status remains
+START TRANSACTION;
+    CALL RevokeCollegeMemberRole(5);  -- Emma Johnson, a Student
+ROLLBACK;
+
+-- Should succeed - revoking Employee nulls ReviewerID on ads they reviewed
+START TRANSACTION;
+    SELECT COUNT(*) AS ReviewedBefore FROM Ad WHERE ReviewerID = 22;
+    CALL RevokeEmployeeRole(22);  -- James Harris, a reviewer
+    SELECT COUNT(*) AS ReviewedAfter FROM Ad WHERE ReviewerID = 22;  -- expect 0
+ROLLBACK;
