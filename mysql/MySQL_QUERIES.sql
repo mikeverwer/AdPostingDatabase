@@ -1171,3 +1171,68 @@ START TRANSACTION;
     CALL RevokeEmployeeRole(22);  -- James Harris, a reviewer
     SELECT COUNT(*) AS ReviewedAfter FROM Ad WHERE ReviewerID = 22;  -- expect 0
 ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- Q35) Submit a new ad for review. Inserts a new Ad row; every other column is
+--      left to its table default, which produces AdStatus = 'Pending',
+--      ReviewerID = NULL, PostDate = NULL, EnteredPending = today, and
+--      ReviewDate = NULL -- a state that already satisfies every CHECK
+--      constraint on Ad without further logic here. Review (ReviewAd) and
+--      physical posting (PostAd) are handled by their own procedures.
+--      This procedure must be called inside a transaction the CALLER controls.
+--      p_Duration has no server-side default (MySQL procedure parameters
+--      cannot carry one); pass NULL to fall back to the table's default of 14.
+DROP PROCEDURE IF EXISTS SubmitAd;
+
+DELIMITER $$
+
+CREATE PROCEDURE SubmitAd (
+    IN  p_PosterID INT,
+    IN  p_Title    VARCHAR(128),
+    IN  p_AdType   VARCHAR(20),
+    IN  p_AdLength INT,
+    IN  p_AdWidth  INT,
+    IN  p_Duration INT,
+    OUT p_AdID     INT
+)
+BEGIN
+    SET p_AdID = NULL;
+
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = p_PosterID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No person exists with the given PosterID.';
+    END IF;
+
+    IF p_Title IS NULL OR TRIM(p_Title) = '' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Title is required.';
+    END IF;
+
+    IF p_AdType NOT IN ('Tutorship', 'Rent', 'Sale', 'Roommate', 'Event', 'Service', 'Other') THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Invalid ad type. Allowed values are Tutorship, Rent, Sale, Roommate, Event, Service, or Other.';
+    END IF;
+
+    IF p_AdLength IS NULL OR p_AdLength <= 0 OR p_AdWidth IS NULL OR p_AdWidth <= 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Ad length and width must both be positive.';
+    END IF;
+
+    IF p_Duration IS NOT NULL AND p_Duration <= 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Duration must be positive.';
+    END IF;
+
+    INSERT INTO Ad (PosterID, Title, AdType, AdLength, AdWidth, Duration)
+    VALUES (p_PosterID, p_Title, p_AdType, p_AdLength, p_AdWidth, IFNULL(p_Duration, 14));
+
+    SET p_AdID = LAST_INSERT_ID();
+END$$
+
+DELIMITER ;
+
+START TRANSACTION;
+    CALL SubmitAd(3, 'Kayak for Sale', 'Sale', 350, 90, NULL, @NewAd);
+    SELECT * FROM Ad WHERE AdID = @NewAd;
+ROLLBACK;
+
+-- Should fail - invalid ad type
+START TRANSACTION;
+    CALL SubmitAd(1, 'Test', 'Rummage', 100, 100, NULL, @BadAd);
+ROLLBACK;

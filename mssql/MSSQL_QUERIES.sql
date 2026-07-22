@@ -1148,3 +1148,75 @@ BEGIN TRANSACTION;
     EXEC RevokeEmployeeRole @_PersonID = 22;  -- James Harris, a reviewer
     SELECT COUNT(*) AS ReviewedAfter FROM Ad WHERE ReviewerID = 22;  -- expect 0
 ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q35) Submit a new ad for review. Inserts a new Ad row; every other column is
+--      left to its table default, which produces AdStatus = 'Pending',
+--      ReviewerID = NULL, PostDate = NULL, EnteredPending = today, and
+--      ReviewDate = NULL -- a state that already satisfies every CHECK
+--      constraint on Ad without further logic here. Review (ReviewAd) and
+--      physical posting (PostAd) are handled by their own procedures.
+--      This procedure must be called inside a transaction the CALLER controls.
+CREATE OR ALTER PROCEDURE SubmitAd
+    @_PosterID INT,
+    @_Title    VARCHAR(128),
+    @_AdType   VARCHAR(20),
+    @_AdLength INT,
+    @_AdWidth  INT,
+    @_Duration INT = 14,
+    @_AdID     INT = NULL OUTPUT
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = @_PosterID)
+    BEGIN
+        RAISERROR('Error: No person exists with the given PosterID.', 16, 1);
+        RETURN;
+    END
+
+    IF @_Title IS NULL OR LTRIM(RTRIM(@_Title)) = ''
+    BEGIN
+        RAISERROR('Error: Title is required.', 16, 1);
+        RETURN;
+    END
+
+    IF @_AdType NOT IN ('Tutorship', 'Rent', 'Sale', 'Roommate', 'Event', 'Service', 'Other')
+    BEGIN
+        RAISERROR('Error: Invalid ad type. Allowed values are Tutorship, Rent, Sale, Roommate, Event, Service, or Other.', 16, 1);
+        RETURN;
+    END
+
+    IF @_AdLength IS NULL OR @_AdLength <= 0 OR @_AdWidth IS NULL OR @_AdWidth <= 0
+    BEGIN
+        RAISERROR('Error: Ad length and width must both be positive.', 16, 1);
+        RETURN;
+    END
+
+    IF @_Duration IS NULL OR @_Duration <= 0
+    BEGIN
+        RAISERROR('Error: Duration must be positive.', 16, 1);
+        RETURN;
+    END
+
+    INSERT INTO Ad (PosterID, Title, AdType, AdLength, AdWidth, Duration)
+    VALUES (@_PosterID, @_Title, @_AdType, @_AdLength, @_AdWidth, @_Duration);
+
+    SET @_AdID = SCOPE_IDENTITY();
+END
+GO
+
+BEGIN TRANSACTION;
+    DECLARE @NewAd INT;
+    EXEC SubmitAd
+        @_PosterID = 3, @_Title = 'Kayak for Sale', @_AdType = 'Sale',
+        @_AdLength = 350, @_AdWidth = 90, @_AdID = @NewAd OUTPUT;
+    SELECT * FROM Ad WHERE AdID = @NewAd;
+ROLLBACK TRANSACTION;
+
+-- Should fail - invalid ad type
+BEGIN TRANSACTION;
+    DECLARE @BadAd INT;
+    EXEC SubmitAd
+        @_PosterID = 1, @_Title = 'Test', @_AdType = 'Rummage',
+        @_AdLength = 100, @_AdWidth = 100, @_AdID = @BadAd OUTPUT;
+ROLLBACK TRANSACTION;
