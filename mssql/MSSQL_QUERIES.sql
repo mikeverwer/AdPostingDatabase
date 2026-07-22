@@ -117,12 +117,14 @@ SELECT
 	Ad.AdType,
 	Ad.PosterID,
 	Ad.ReviewerID,    
-    Ad.AdStatus,
+    Ad.ReviewStatus,
     Ad.ReviewDate,
     Ad.PostDate,
     Ad.Duration,
     Ad.AdWidth,
-    Ad.AdLength
+    Ad.AdLength,
+    Ad.IsWithdrawn,
+    Ad.WithdrawnDate
 FROM 
 	Ad_Posted_Board AS APB 
 	INNER JOIN Ad ON APB.AdID = Ad.AdID;
@@ -239,9 +241,9 @@ CREATE OR ALTER VIEW vw_ReviewCountsPerReviewer AS
 SELECT 
     R.PersonID,
     CONCAT(P.FirstName, ' ', P.LastName) AS ReviewerName,
-    SUM(CASE WHEN A.AdStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
-    SUM(CASE WHEN A.AdStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
-    SUM(CASE WHEN A.AdStatus IN ('Approved', 'Rejected') THEN 1 ELSE 0 END) AS TotalReviews
+    SUM(CASE WHEN A.ReviewStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
+    SUM(CASE WHEN A.ReviewStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
+    SUM(CASE WHEN A.ReviewStatus IN ('Approved', 'Rejected') THEN 1 ELSE 0 END) AS TotalReviews
 FROM 
     Employee AS R
     LEFT JOIN Person AS P ON R.PersonID = P.PersonID
@@ -257,11 +259,11 @@ UNION ALL
 SELECT 
     NULL AS PersonID,
     'Deleted Reviewer(s)' AS ReviewerName,
-    SUM(CASE WHEN AdStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
-    SUM(CASE WHEN AdStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
+    SUM(CASE WHEN ReviewStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
+    SUM(CASE WHEN ReviewStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
     COUNT(*) AS TotalReviews
 FROM Ad
-WHERE ReviewerID IS NULL AND AdStatus IN ('Approved', 'Rejected')
+WHERE ReviewerID IS NULL AND ReviewStatus IN ('Approved', 'Rejected')
 HAVING COUNT(*) > 0;
 
 GO
@@ -277,7 +279,8 @@ AS
 SELECT * 
 FROM Ad AS A
 WHERE 
-    A.AdStatus = 'Approved' 
+    A.ReviewStatus = 'Approved' 
+    AND A.IsWithdrawn = 0
     AND NOT EXISTS (
         SELECT 1 
         FROM Ad_Posted_Board AS APB 
@@ -316,7 +319,7 @@ BEGIN
     FROM
         Person AS P
         INNER JOIN Ad AS A ON P.PersonID = A.PosterID
-    WHERE A.AdStatus = 'Rejected'
+    WHERE A.ReviewStatus = 'Rejected'
     GROUP BY P.PersonID, P.FirstName, P.LastName
     HAVING COUNT(DISTINCT A.AdID) >= @_MinRejections;
 END
@@ -351,7 +354,7 @@ BEGIN
         LEFT JOIN Person AS P ON E.PersonID = P.PersonID
     WHERE
         A.PosterID = @_PosterID
-        AND A.AdStatus = 'Rejected'
+        AND A.ReviewStatus = 'Rejected'
     ORDER BY A.AdID;
 END
 GO
@@ -414,7 +417,7 @@ SELECT
 FROM
     Ad AS A
     INNER JOIN Person AS P ON A.PosterID = P.PersonID
-WHERE A.AdStatus = 'Pending';
+WHERE A.ReviewStatus = 'Pending' AND A.IsWithdrawn = 0;
 
 GO
 SELECT * FROM vw_ReviewQueue;
@@ -423,6 +426,9 @@ SELECT * FROM vw_ReviewQueue;
 GO
 -- Q17) Approve or Reject an ad
 CREATE OR ALTER PROCEDURE ReviewAd 
+    -- This procedure must be called inside a transaction the CALLER controls
+    -- (BEGIN TRANSACTION ... COMMIT/ROLLBACK), so the lock below is held for
+    -- the full validate-then-update sequence instead of just one statement.
     @_AdID INT,
     @_Status VARCHAR(10),
     @_ReviewerID INT,
@@ -435,17 +441,24 @@ BEGIN
         RETURN;
     END
     IF @_ReviewerID IS NULL OR @_ReviewerID NOT IN (
-        SELECT PersonID 
-        FROM Employee 
-        WHERE IsReviewer = 1)
+        SELECT PersonID FROM Employee WHERE IsReviewer = 1)
     BEGIN
         RAISERROR('Invalid Reviewer ID. Only a Reviewer can evaluate an ad.', 16, 1);
         RETURN;
     END
 
+    IF EXISTS (
+        SELECT 1 FROM Ad WITH (UPDLOCK, HOLDLOCK)
+        WHERE AdID = @_AdID AND IsWithdrawn = 1
+    )
+    BEGIN
+        RAISERROR('Error: This ad has been withdrawn and can no longer be reviewed.', 16, 1);
+        RETURN;
+    END
+
     UPDATE Ad
     SET 
-        AdStatus = @_Status,
+        ReviewStatus = @_Status,
         ReviewDate = 
             CASE
                 WHEN @_Status != 'Pending' THEN
@@ -516,18 +529,30 @@ BEGIN
         SELECT 1
         FROM Ad WITH (UPDLOCK, HOLDLOCK)
         WHERE 
-            AdStatus = 'Approved'
+            ReviewStatus = 'Approved'
             AND AdID = @_AdID
     )
     BEGIN
         RAISERROR('Error: Ad is not approved.', 16, 1);
         RETURN;
     END
+    
+    -- check the ad has not expired
+    IF EXISTS (
+        SELECT 1 FROM Ad WHERE AdID = @_AdID AND IsWithdrawn = 1
+    )
+    BEGIN
+        RAISERROR('Error: This ad has been withdrawn and cannot be posted.', 16, 1);
+        RETURN;
+    END
+        
+    -- check the ad has not expired
     IF @_AdID IN (SELECT AdID FROM vw_ExpiredAds)
     BEGIN
         RAISERROR('Error: Ad posting duration has expired.', 16, 1);
         RETURN;
     END
+
     -- check if given board is valid
     IF NOT EXISTS (
         SELECT 1
@@ -612,7 +637,7 @@ BEGIN
     SELECT
         A.Title,
         A.AdType,
-        A.AdStatus,
+        A.ReviewStatus,
         CASE WHEN E.PersonID IS NOT NULL 
              THEN CONCAT(P.FirstName, ' ', P.LastName) 
              ELSE 'No reviewer on record' 
@@ -652,10 +677,10 @@ SELECT
     Slot,
     AdID,
     Title,
-    AdStatus,
+    ReviewStatus,
     ReviewDate
 FROM PostedAdsInfo
-WHERE AdStatus <> 'Approved';
+WHERE ReviewStatus <> 'Approved' OR IsWithdrawn = 1;
 
 GO
 SELECT * FROM vw_UnapprovedPostings;
@@ -1152,7 +1177,7 @@ ROLLBACK TRANSACTION;
 -- -------------------------------------------------------------------------------
 GO
 -- Q35) Submit a new ad for review. Inserts a new Ad row; every other column is
---      left to its table default, which produces AdStatus = 'Pending',
+--      left to its table default, which produces ReviewStatus = 'Pending',
 --      ReviewerID = NULL, PostDate = NULL, EnteredPending = today, and
 --      ReviewDate = NULL -- a state that already satisfies every CHECK
 --      constraint on Ad without further logic here. Review (ReviewAd) and
@@ -1234,7 +1259,7 @@ GO
 --          about a specific ad and involves whoever posted it.
 --        - Messaging is only allowed on an Approved ad, UNLESS the sender or
 --          recipient is a reviewer (Employee.IsReviewer = 1), in which case
---          messaging is allowed regardless of AdStatus, so a reviewer can
+--          messaging is allowed regardless of ReviewStatus, so a reviewer can
 --          ask the poster a clarifying question before a decision is made.
 --          This checks reviewer status generally, not whether that specific
 --          person is THIS ad's ReviewerID -- there is currently no way to
@@ -1250,10 +1275,16 @@ CREATE OR ALTER PROCEDURE SendMessage
     @_Content     VARCHAR(MAX)
 AS
 BEGIN
-    DECLARE @PosterID INT, @AdStatus VARCHAR(10);
+    DECLARE @PosterID INT, @ReviewStatus VARCHAR(10);
 
-    SELECT @PosterID = PosterID, @AdStatus = AdStatus
+    SELECT @PosterID = PosterID, @ReviewStatus = ReviewStatus
     FROM Ad WHERE AdID = @_AdID;
+
+    IF EXISTS (SELECT 1 FROM Ad WHERE AdID = @_AdID AND IsWithdrawn = 1)
+    BEGIN
+        RAISERROR('Error: This ad has been withdrawn; no further messages are allowed.', 16, 1);
+        RETURN;
+    END
 
     IF @PosterID IS NULL
     BEGIN
@@ -1279,7 +1310,7 @@ BEGIN
         RETURN;
     END
 
-    IF @AdStatus <> 'Approved'
+    IF @ReviewStatus <> 'Approved'
        AND NOT EXISTS (
             SELECT 1 FROM Employee
             WHERE IsReviewer = 1 AND PersonID IN (@_SenderID, @_RecipientID)
@@ -1400,4 +1431,64 @@ ROLLBACK TRANSACTION;
 BEGIN TRANSACTION;
     DECLARE @BadDeleted INT;
     EXEC DeleteAdMessages @_AdID = 9999, @_DeletedCount = @BadDeleted OUTPUT;
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- Q39) Withdraw an ad. Poster-initiated; sets IsWithdrawn/WithdrawnDate and
+--      purges every message on the ad (via DeleteAdMessages), but does NOT
+--      touch ReviewStatus and does NOT remove the ad from any board it is
+--      currently posted to. Physical takedown is a separate, admin-run step
+--      (UnpostAd), surfaced by vw_UnapprovedPostings once this has run.
+--      Withdrawal is one-way: ReviewAd refuses to act on an already-withdrawn ad.
+--      This procedure must be called inside a transaction the CALLER controls.
+CREATE OR ALTER PROCEDURE WithdrawAd
+    @_AdID                INT,
+    @_PosterID            INT,
+    @_DeletedMessageCount INT = NULL OUTPUT
+AS
+BEGIN
+    DECLARE @ActualPosterID INT, @AlreadyWithdrawn BIT;
+
+    SELECT @ActualPosterID = PosterID, @AlreadyWithdrawn = IsWithdrawn
+    FROM Ad WITH (UPDLOCK, HOLDLOCK)
+    WHERE AdID = @_AdID;
+
+    IF @ActualPosterID IS NULL
+    BEGIN
+        RAISERROR('Error: No ad exists with the given AdID.', 16, 1);
+        RETURN;
+    END
+
+    IF @ActualPosterID <> @_PosterID
+    BEGIN
+        RAISERROR('Error: Only the ad''s poster may withdraw it.', 16, 1);
+        RETURN;
+    END
+
+    IF @AlreadyWithdrawn = 1
+    BEGIN
+        RAISERROR('Error: This ad has already been withdrawn.', 16, 1);
+        RETURN;
+    END
+
+    UPDATE Ad
+    SET IsWithdrawn = 1, WithdrawnDate = CAST(GETDATE() AS DATE)
+    WHERE AdID = @_AdID;
+
+    EXEC DeleteAdMessages @_AdID = @_AdID, @_DeletedCount = @_DeletedMessageCount OUTPUT;
+END
+GO
+
+BEGIN TRANSACTION;
+    DECLARE @Deleted INT;
+    EXEC WithdrawAd @_AdID = 1, @_PosterID = 1, @_DeletedMessageCount = @Deleted OUTPUT;
+    SELECT @Deleted AS MessagesDeleted;
+    SELECT ReviewStatus, IsWithdrawn, WithdrawnDate FROM Ad WHERE AdID = 1;
+ROLLBACK TRANSACTION;
+
+-- Should fail - wrong poster
+BEGIN TRANSACTION;
+    DECLARE @BadWithdraw INT;
+    EXEC WithdrawAd @_AdID = 1, @_PosterID = 999, @_DeletedMessageCount = @BadWithdraw OUTPUT;
 ROLLBACK TRANSACTION;

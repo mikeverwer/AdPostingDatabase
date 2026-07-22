@@ -115,12 +115,14 @@ SELECT
 	Ad.AdType,
 	Ad.PosterID,
 	Ad.ReviewerID,    
-    Ad.AdStatus,
+    Ad.ReviewStatus,
     Ad.ReviewDate,
     Ad.PostDate,
     Ad.Duration,
     Ad.AdWidth,
-    Ad.AdLength
+    Ad.AdLength,
+    Ad.IsWithdrawn,
+    Ad.WithdrawnDate
 FROM 
     Ad_Posted_Board AS APB 
     INNER JOIN Ad ON APB.AdID = Ad.AdID;
@@ -239,9 +241,9 @@ CREATE VIEW vw_ReviewCountsPerReviewer AS
 SELECT 
     R.PersonID,
     CONCAT(P.FirstName, ' ', P.LastName) AS ReviewerName,
-    SUM(CASE WHEN A.AdStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
-    SUM(CASE WHEN A.AdStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
-    SUM(CASE WHEN A.AdStatus IN ('Approved', 'Rejected') THEN 1 ELSE 0 END) AS TotalReviews
+    SUM(CASE WHEN A.ReviewStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
+    SUM(CASE WHEN A.ReviewStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
+    SUM(CASE WHEN A.ReviewStatus IN ('Approved', 'Rejected') THEN 1 ELSE 0 END) AS TotalReviews
 FROM 
     Employee AS R
     LEFT JOIN Person AS P ON R.PersonID = P.PersonID
@@ -257,11 +259,11 @@ UNION ALL
 SELECT 
     NULL AS PersonID,
     'Deleted Reviewer(s)' AS ReviewerName,
-    SUM(CASE WHEN AdStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
-    SUM(CASE WHEN AdStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
+    SUM(CASE WHEN ReviewStatus = 'Approved' THEN 1 ELSE 0 END) AS ApprovedCount,
+    SUM(CASE WHEN ReviewStatus = 'Rejected' THEN 1 ELSE 0 END) AS RejectedCount,
     COUNT(*) AS TotalReviews
 FROM Ad
-WHERE ReviewerID IS NULL AND AdStatus IN ('Approved', 'Rejected')
+WHERE ReviewerID IS NULL AND ReviewStatus IN ('Approved', 'Rejected')
 HAVING COUNT(*) > 0;
 
 SELECT * FROM vw_ReviewCountsPerReviewer
@@ -277,7 +279,8 @@ CREATE VIEW vw_PendingPosting AS
 SELECT * 
 FROM Ad AS A
 WHERE 
-    A.AdStatus = 'Approved' 
+    A.ReviewStatus = 'Approved' 
+    AND A.IsWithdrawn = 0
     AND NOT EXISTS (
         SELECT 1 
         FROM Ad_Posted_Board AS APB 
@@ -330,7 +333,7 @@ BEGIN
     FROM
         Person AS P
         INNER JOIN Ad AS A ON P.PersonID = A.PosterID
-    WHERE A.AdStatus = 'Rejected'
+    WHERE A.ReviewStatus = 'Rejected'
     GROUP BY P.PersonID, P.FirstName, P.LastName
     HAVING COUNT(DISTINCT A.AdID) >= p_MinRejections;
 END$$
@@ -369,7 +372,7 @@ BEGIN
         LEFT JOIN Person AS P ON E.PersonID = P.PersonID
     WHERE
         A.PosterID = p_PosterID
-        AND A.AdStatus = 'Rejected'
+        AND A.ReviewStatus = 'Rejected'
     ORDER BY A.AdID;
 END$$
 
@@ -437,7 +440,7 @@ SELECT
 FROM
     Ad AS A
     INNER JOIN Person AS P ON A.PosterID = P.PersonID
-WHERE A.AdStatus = 'Pending';
+WHERE A.ReviewStatus = 'Pending' AND A.IsWithdrawn = 0;
 
 SELECT * FROM vw_ReviewQueue;
 
@@ -450,35 +453,42 @@ DELIMITER $$
 
 CREATE PROCEDURE ReviewAd 
 (
+    -- This procedure must be called inside a transaction the CALLER controls
+    -- (START TRANSACTION ... COMMIT/ROLLBACK), so the lock below is held for
+    -- the full validate-then-update sequence instead of just one statement.
     IN p_AdID INT,
     IN p_Status VARCHAR(10),
     IN p_ReviewerID INT,
     IN p_ReviewDate DATE
 )
 BEGIN
-    -- Validate status
     IF p_Status NOT IN ('Approved', 'Rejected', 'Pending') THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Invalid status. Allowed values are Approved, Rejected, or Pending';
     END IF;
 
-    -- Validate reviewer
     IF p_ReviewerID IS NULL OR p_ReviewerID NOT IN (
-        SELECT PersonID 
-        FROM Employee 
-        WHERE IsReviewer = 1
+        SELECT PersonID FROM Employee WHERE IsReviewer = 1
     ) THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Invalid Reviewer ID. Only a Reviewer can evaluate an ad.';
     END IF;
 
+    IF EXISTS (
+        SELECT 1 FROM Ad
+        WHERE AdID = p_AdID AND IsWithdrawn = 1
+        FOR UPDATE
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: This ad has been withdrawn and can no longer be reviewed.';
+    END IF;
+
     UPDATE Ad
     SET 
-        AdStatus = p_Status,
+        ReviewStatus = p_Status,
         ReviewDate = 
             CASE
-                WHEN p_Status != 'Pending' THEN
-                    IFNULL(p_ReviewDate, CURDATE())
+                WHEN p_Status != 'Pending' THEN IFNULL(p_ReviewDate, CURDATE())
                 ELSE NULL
             END,
         ReviewerID = 
@@ -550,12 +560,20 @@ BEGIN
         SELECT 1
         FROM Ad
         WHERE 
-            AdStatus = 'Approved'
+            ReviewStatus = 'Approved'
             AND AdID = p_AdID
         FOR UPDATE
     ) THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Error: Ad is not approved.';
+    END IF;
+    
+    -- check the ad has not expired
+    IF EXISTS (
+        SELECT 1 FROM Ad WHERE AdID = p_AdID AND IsWithdrawn = 1
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: This ad has been withdrawn and cannot be posted.';
     END IF;
 
     -- check the ad has not expired
@@ -661,7 +679,7 @@ BEGIN
     SELECT
         A.Title,
         A.AdType,
-        A.AdStatus,
+        A.ReviewStatus,
         CASE WHEN E.PersonID IS NOT NULL 
              THEN CONCAT(P.FirstName, ' ', P.LastName) 
              ELSE 'No reviewer on record' 
@@ -704,10 +722,10 @@ SELECT
     Slot,
     AdID,
     Title,
-    AdStatus,
+    ReviewStatus,
     ReviewDate
 FROM PostedAdsInfo
-WHERE AdStatus <> 'Approved';
+WHERE ReviewStatus <> 'Approved' OR IsWithdrawn = 1;
 
 -- -------------------------------------------------------------------------------
 
@@ -1175,7 +1193,7 @@ ROLLBACK;
 -- -------------------------------------------------------------------------------
 
 -- Q35) Submit a new ad for review. Inserts a new Ad row; every other column is
---      left to its table default, which produces AdStatus = 'Pending',
+--      left to its table default, which produces ReviewStatus = 'Pending',
 --      ReviewerID = NULL, PostDate = NULL, EnteredPending = today, and
 --      ReviewDate = NULL -- a state that already satisfies every CHECK
 --      constraint on Ad without further logic here. Review (ReviewAd) and
@@ -1259,10 +1277,15 @@ CREATE PROCEDURE SendMessage (
 )
 BEGIN
     DECLARE v_PosterID INT;
-    DECLARE v_AdStatus VARCHAR(10);
+    DECLARE v_ReviewStatus VARCHAR(10);
 
-    SELECT PosterID, AdStatus INTO v_PosterID, v_AdStatus
+    SELECT PosterID, ReviewStatus INTO v_PosterID, v_ReviewStatus
     FROM Ad WHERE AdID = p_AdID;
+
+    IF EXISTS (SELECT 1 FROM Ad WHERE AdID = p_AdID AND IsWithdrawn = 1) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: This ad has been withdrawn; no further messages are allowed.';
+    END IF;
 
     IF v_PosterID IS NULL THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No ad exists with the given AdID.';
@@ -1280,7 +1303,7 @@ BEGIN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This ad''s poster must be either the sender or the recipient.';
     END IF;
 
-    IF v_AdStatus <> 'Approved'
+    IF v_ReviewStatus <> 'Approved'
        AND NOT EXISTS (
             SELECT 1 FROM Employee
             WHERE IsReviewer = 1 AND PersonID IN (p_SenderID, p_RecipientID)
@@ -1403,4 +1426,62 @@ ROLLBACK;
 -- Should fail - no such ad
 START TRANSACTION;
     CALL DeleteAdMessages(9999, @BadDeleted);
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- Q39) Withdraw an ad. Same behavior as the MSSQL version: poster-initiated,
+--      sets IsWithdrawn/WithdrawnDate, purges messages via DeleteAdMessages,
+--      leaves ReviewStatus and any board postings untouched.
+--      This procedure must be called inside a transaction the CALLER controls.
+DROP PROCEDURE IF EXISTS WithdrawAd;
+
+DELIMITER $$
+
+CREATE PROCEDURE WithdrawAd (
+    IN  p_AdID                INT,
+    IN  p_PosterID            INT,
+    OUT p_DeletedMessageCount INT
+)
+BEGIN
+    DECLARE v_ActualPosterID INT;
+    DECLARE v_AlreadyWithdrawn BIT;
+
+    SET p_DeletedMessageCount = NULL;
+
+    SELECT PosterID, IsWithdrawn INTO v_ActualPosterID, v_AlreadyWithdrawn
+    FROM Ad
+    WHERE AdID = p_AdID
+    FOR UPDATE;
+
+    IF v_ActualPosterID IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No ad exists with the given AdID.';
+    END IF;
+
+    IF v_ActualPosterID <> p_PosterID THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Only the ad''s poster may withdraw it.';
+    END IF;
+
+    IF v_AlreadyWithdrawn = 1 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This ad has already been withdrawn.';
+    END IF;
+
+    UPDATE Ad
+    SET IsWithdrawn = 1, WithdrawnDate = CURDATE()
+    WHERE AdID = p_AdID;
+
+    CALL DeleteAdMessages(p_AdID, p_DeletedMessageCount);
+END$$
+
+DELIMITER ;
+
+START TRANSACTION;
+    CALL WithdrawAd(1, 1, @Deleted);
+    SELECT @Deleted AS MessagesDeleted;
+    SELECT ReviewStatus, IsWithdrawn, WithdrawnDate FROM Ad WHERE AdID = 1;
+ROLLBACK;
+
+-- Should fail - wrong poster
+START TRANSACTION;
+    CALL WithdrawAd(1, 999, @BadWithdraw);
 ROLLBACK;

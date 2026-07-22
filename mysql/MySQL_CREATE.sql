@@ -100,23 +100,29 @@ CREATE TABLE Ad (
 	AdWidth 	    INT					NOT NULL,
 	Duration 	    INT 				NOT NULL	DEFAULT (14),
 	PostDate 	    DATE				NULL,
-	AdStatus 	    VARCHAR(10) 		NOT NULL	DEFAULT ('Pending'), 
+	ReviewStatus 	    VARCHAR(10) 		NOT NULL	DEFAULT ('Pending'), 
     EnteredPending  DATE                NOT NULL    DEFAULT (CURRENT_DATE),
     ReviewDate      DATE                NULL,
+    IsWithdrawn     BIT                 NOT NULL    DEFAULT (0),
+    WithdrawnDate   DATE                NULL,
 	-- Constraints 	
     PRIMARY KEY (AdID),
     CONSTRAINT chk_ad_type              CHECK (AdType IN ('Tutorship','Rent','Sale','Roommate','Event', 'Service', 'Other')),
-    CONSTRAINT chk_ad_status            CHECK (AdStatus IN ('Pending','Approved','Rejected')),
+    CONSTRAINT chk_ad_status            CHECK (ReviewStatus IN ('Pending','Approved','Rejected')),
     CONSTRAINT chk_ad_poster_reviewer   CHECK (PosterID <> ReviewerID),
     CONSTRAINT chk_ad_duration_positive CHECK (Duration > 0),
     CONSTRAINT chk_ad_adlength_positive CHECK (AdLength > 0),
     CONSTRAINT chk_ad_adwidth_positive  CHECK (AdWidth > 0),
 	CONSTRAINT chk_ad_postdate_requires_approval 
-		CHECK (PostDate IS NULL OR AdStatus = 'Approved'),
+		CHECK (PostDate IS NULL OR ReviewStatus = 'Approved'),
 	CONSTRAINT chk_ad_reviewdate_requires_nonpending
-        CHECK (ReviewDate IS NULL OR AdStatus <> 'Pending'),
+        CHECK (ReviewDate IS NULL OR ReviewStatus <> 'Pending'),
     CONSTRAINT chk_ad_nonpending_requires_reviewdate
-        CHECK (AdStatus = 'Pending' OR ReviewDate IS NOT NULL)  
+        CHECK (ReviewStatus = 'Pending' OR ReviewDate IS NOT NULL),
+    CONSTRAINT chk_ad_withdrawndate_requires_withdrawn
+        CHECK (WithdrawnDate IS NULL OR IsWithdrawn = 1),
+    CONSTRAINT chk_ad_withdrawn_requires_withdrawndate
+        CHECK (IsWithdrawn = 0 OR WithdrawnDate IS NOT NULL)
 );
 
 CREATE TABLE Board (

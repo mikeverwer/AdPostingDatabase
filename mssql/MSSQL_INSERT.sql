@@ -1,4 +1,13 @@
+-- =============================================================================
 -- SEED_ANCHOR_DATE: 2026-07-21
+--
+-- Every date and timestamp below is expressed relative to the anchor date above.
+-- Run shift_seed_dates.py to slide the whole dataset forward so that it sits
+-- near the current date again; the script rewrites this line to the new anchor.
+-- Relative spacing between all dates is preserved, so the invariants the seed
+-- data is built around (EnteredPending <= ReviewDate <= PostDate, the mix of
+-- expired and active postings, message chronology) continue to hold.
+-- =============================================================================
 
 USE AdPostingDB;
 GO
@@ -122,53 +131,54 @@ GO
 -- Insert 36 Ads
 -- EnteredPending records when an ad most recently entered Pending status; it is
 -- never cleared, so it retains its value after an ad is approved or rejected.
--- ReviewDate is stamped whenever AdStatus <> 'Pending'. PostDate is only ever set
+-- ReviewDate is stamped whenever ReviewStatus <> 'Pending'. PostDate is only ever set
 -- once an ad is physically placed on a board (see PostAd), and always on or after
--- its ReviewDate.
-INSERT INTO Ad (PosterID, ReviewerID, Title, AdType, AdLength, AdWidth, Duration, PostDate, AdStatus, EnteredPending, ReviewDate) VALUES
+-- its ReviewDate. IsWithdrawn/WithdrawnDate are independent of ReviewStatus; every
+-- ad in this seed data is un-withdrawn (0, NULL).
+INSERT INTO Ad (PosterID, ReviewerID, Title, AdType, AdLength, AdWidth, Duration, PostDate, ReviewStatus, EnteredPending, ReviewDate, IsWithdrawn, WithdrawnDate) VALUES
 -- Approved and posted (18)
-(1 , 22,   'Textbook for Sale',              'Sale',      300,   200,   14,  '2026-06-16', 'Approved', '2026-06-14', '2026-06-16'),
-(5 , 26,   'Roommate Wanted',                'Roommate',  400,   250,   21,  '2026-06-21', 'Approved', '2026-06-19', '2026-06-21'),
-(6 , 22,   'Tutoring Services',              'Tutorship', 350,   220,   14,  '2026-06-23', 'Approved', '2026-06-20', '2026-06-23'),
-(7 , 28,   'Campus Event DJ',                'Service',   300,   200,   7,   '2026-06-26', 'Approved', '2026-06-24', '2026-06-26'),
-(8 , 28,   'Used Laptop',                    'Sale',      300,   200,   14,  '2026-06-29', 'Approved', '2026-06-27', '2026-06-29'),
-(5 , 26,   'Study Group Formation',          'Tutorship', 350,   220,   10,  '2026-07-03', 'Approved', '2026-07-01', '2026-07-03'),
-(9 , 22,   'Lab Equipment Sale',             'Sale',      400,   250,   14,  '2026-07-04', 'Approved', '2026-06-26', '2026-06-29'), -- approved 5 days before it was actually posted
-(2 , 28,   'Bike for Sale',                  'Sale',      300,   200,   14,  '2026-07-05', 'Approved', '2026-07-03', '2026-07-05'),
-(10, 28,   'Apartment Sublet',               'Roommate',  400,   250,   30,  '2026-07-06', 'Approved', '2026-07-04', '2026-07-06'),
-(11, 22,   'Guitar Lessons',                 'Tutorship', 350,   220,   21,  '2026-07-07', 'Approved', '2026-07-05', '2026-07-07'),
-(12, 26,   'Math Tutor Available',           'Tutorship', 300,   200,   14,  '2026-07-08', 'Approved', '2026-07-06', '2026-07-08'),
-(6 , 22,   'Engineering Textbooks',          'Sale',      350,   220,   14,  '2026-07-09', 'Approved', '2026-07-07', '2026-07-09'),
-(13, 28,   'Photography Services',           'Service',   400,   250,   21,  '2026-07-10', 'Approved', '2026-07-08', '2026-07-10'),
-(30, 22,   'Colloquium: Quantum Matter',     'Event',     400,   300,   14,  '2026-07-11', 'Approved', '2026-07-08', '2026-07-10'),
-(31, 26,   'Summer Concert on the Green',    'Event',     500,   350,   21,  '2026-07-12', 'Approved', '2026-07-09', '2026-07-11'),
-(23, 28,   'Guest Lecture: Urban Policy',    'Event',     400,   300,   10,  '2026-07-13', 'Approved', '2026-07-10', '2026-07-12'),
-(4 , 22,   'Winter Tires, Set of Four',      'Sale',      300,   200,   14,  '2026-07-14', 'Approved', '2026-07-12', '2026-07-14'),
-(20, 26,   'Piano Accompanist Available',    'Service',   350,   220,   21,  '2026-07-15', 'Approved', '2026-07-13', '2026-07-15'),
+(1 , 22,   'Textbook for Sale',              'Sale',      300,   200,   14,  '2026-06-16', 'Approved', '2026-06-14', '2026-06-16', 0, NULL),
+(5 , 26,   'Roommate Wanted',                'Roommate',  400,   250,   21,  '2026-06-21', 'Approved', '2026-06-19', '2026-06-21', 0, NULL),
+(6 , 22,   'Tutoring Services',              'Tutorship', 350,   220,   14,  '2026-06-23', 'Approved', '2026-06-20', '2026-06-23', 0, NULL),
+(7 , 28,   'Campus Event DJ',                'Service',   300,   200,   7,   '2026-06-26', 'Approved', '2026-06-24', '2026-06-26', 0, NULL),
+(8 , 28,   'Used Laptop',                    'Sale',      300,   200,   14,  '2026-06-29', 'Approved', '2026-06-27', '2026-06-29', 0, NULL),
+(5 , 26,   'Study Group Formation',          'Tutorship', 350,   220,   10,  '2026-07-03', 'Approved', '2026-07-01', '2026-07-03', 0, NULL),
+(9 , 22,   'Lab Equipment Sale',             'Sale',      400,   250,   14,  '2026-07-04', 'Approved', '2026-06-26', '2026-06-29', 0, NULL), -- approved 5 days before it was actually posted
+(2 , 28,   'Bike for Sale',                  'Sale',      300,   200,   14,  '2026-07-05', 'Approved', '2026-07-03', '2026-07-05', 0, NULL),
+(10, 28,   'Apartment Sublet',               'Roommate',  400,   250,   30,  '2026-07-06', 'Approved', '2026-07-04', '2026-07-06', 0, NULL),
+(11, 22,   'Guitar Lessons',                 'Tutorship', 350,   220,   21,  '2026-07-07', 'Approved', '2026-07-05', '2026-07-07', 0, NULL),
+(12, 26,   'Math Tutor Available',           'Tutorship', 300,   200,   14,  '2026-07-08', 'Approved', '2026-07-06', '2026-07-08', 0, NULL),
+(6 , 22,   'Engineering Textbooks',          'Sale',      350,   220,   14,  '2026-07-09', 'Approved', '2026-07-07', '2026-07-09', 0, NULL),
+(13, 28,   'Photography Services',           'Service',   400,   250,   21,  '2026-07-10', 'Approved', '2026-07-08', '2026-07-10', 0, NULL),
+(30, 22,   'Colloquium: Quantum Matter',     'Event',     400,   300,   14,  '2026-07-11', 'Approved', '2026-07-08', '2026-07-10', 0, NULL),
+(31, 26,   'Summer Concert on the Green',    'Event',     500,   350,   21,  '2026-07-12', 'Approved', '2026-07-09', '2026-07-11', 0, NULL),
+(23, 28,   'Guest Lecture: Urban Policy',    'Event',     400,   300,   10,  '2026-07-13', 'Approved', '2026-07-10', '2026-07-12', 0, NULL),
+(4 , 22,   'Winter Tires, Set of Four',      'Sale',      300,   200,   14,  '2026-07-14', 'Approved', '2026-07-12', '2026-07-14', 0, NULL),
+(20, 26,   'Piano Accompanist Available',    'Service',   350,   220,   21,  '2026-07-15', 'Approved', '2026-07-13', '2026-07-15', 0, NULL),
 
 -- Approved, not yet posted (6)
-(14, 22,   'Programming Help',               'Tutorship', 300,   200,   14,  NULL,         'Approved', '2026-07-08', '2026-07-10'),
-(30, 28,   'Seminar: Science Writing',       'Event',     400,   300,   10,  NULL,         'Approved', '2026-07-13', '2026-07-15'),
-(21, 26,   'Statistics Tutoring',            'Tutorship', 300,   200,   14,  NULL,         'Approved', '2026-07-14', '2026-07-16'),
-(15, 22,   'Room in Shared House',           'Rent',      400,   250,   30,  NULL,         'Approved', '2026-07-15', '2026-07-17'),
-(24, 28,   'Lost and Found Reminder',        'Other',     250,   180,   30,  NULL,         'Approved', '2026-07-16', '2026-07-18'),
-(16, 26,   'Bicycle Repair Service',         'Service',   300,   200,   21,  NULL,         'Approved', '2026-07-17', '2026-07-19'),
+(14, 22,   'Programming Help',               'Tutorship', 300,   200,   14,  NULL,         'Approved', '2026-07-08', '2026-07-10', 0, NULL),
+(30, 28,   'Seminar: Science Writing',       'Event',     400,   300,   10,  NULL,         'Approved', '2026-07-13', '2026-07-15', 0, NULL),
+(21, 26,   'Statistics Tutoring',            'Tutorship', 300,   200,   14,  NULL,         'Approved', '2026-07-14', '2026-07-16', 0, NULL),
+(15, 22,   'Room in Shared House',           'Rent',      400,   250,   30,  NULL,         'Approved', '2026-07-15', '2026-07-17', 0, NULL),
+(24, 28,   'Lost and Found Reminder',        'Other',     250,   180,   30,  NULL,         'Approved', '2026-07-16', '2026-07-18', 0, NULL),
+(16, 26,   'Bicycle Repair Service',         'Service',   300,   200,   21,  NULL,         'Approved', '2026-07-17', '2026-07-19', 0, NULL),
 
 -- Pending (7)
-(17, NULL, 'Chemistry Lab Partner',          'Tutorship', 300,   200,   7,   NULL,         'Pending',  '2026-07-16', NULL        ),
-(18, NULL, 'Business Books',                 'Sale',      350,   220,   14,  NULL,         'Pending',  '2026-07-17', NULL        ),
-(3 , NULL, 'Car for Sale',                   'Sale',      400,   250,   21,  NULL,         'Pending',  '2026-07-18', NULL        ),
-(19, NULL, 'History Study Group',            'Tutorship', 300,   200,   10,  NULL,         'Pending',  '2026-07-19', NULL        ),
-(31, NULL, 'Departmental Open House',        'Event',     400,   300,   14,  NULL,         'Pending',  '2026-07-21', NULL        ),
-(27, NULL, 'Carpool to Downtown',            'Other',     250,   180,   21,  NULL,         'Pending',  '2026-07-21', NULL        ),
-(21, NULL, 'Textbook Bundle, CS Courses',    'Sale',      300,   200,   14,  NULL,         'Pending',  '2026-07-21', NULL        ),
+(17, NULL, 'Chemistry Lab Partner',          'Tutorship', 300,   200,   7,   NULL,         'Pending',  '2026-07-16', NULL,         0, NULL),
+(18, NULL, 'Business Books',                 'Sale',      350,   220,   14,  NULL,         'Pending',  '2026-07-17', NULL,         0, NULL),
+(3 , NULL, 'Car for Sale',                   'Sale',      400,   250,   21,  NULL,         'Pending',  '2026-07-18', NULL,         0, NULL),
+(19, NULL, 'History Study Group',            'Tutorship', 300,   200,   10,  NULL,         'Pending',  '2026-07-19', NULL,         0, NULL),
+(31, NULL, 'Departmental Open House',        'Event',     400,   300,   14,  NULL,         'Pending',  '2026-07-21', NULL,         0, NULL),
+(27, NULL, 'Carpool to Downtown',            'Other',     250,   180,   21,  NULL,         'Pending',  '2026-07-21', NULL,         0, NULL),
+(21, NULL, 'Textbook Bundle, CS Courses',    'Sale',      300,   200,   14,  NULL,         'Pending',  '2026-07-21', NULL,         0, NULL),
 
 -- Rejected (5)
-(17, 22,   'Prohibited Item',                'Sale',      300,   200,   14,  NULL,         'Rejected', '2026-06-30', '2026-07-02'),
-(19, 28,   'Inappropriate Service',          'Service',   350,   220,   14,  NULL,         'Rejected', '2026-07-06', '2026-07-08'),
-(19, 28,   'Giant Ad',                       'Tutorship', 3500,  2100,  14,  NULL,         'Rejected', '2026-07-07', '2026-07-09'),
-(19, 26,   'Unverified Cash Offer',          'Other',     300,   200,   14,  NULL,         'Rejected', '2026-07-12', '2026-07-14'),
-(29, 22,   'Off-Campus Solicitation',        'Other',     300,   200,   14,  NULL,         'Rejected', '2026-07-15', '2026-07-17');
+(17, 22,   'Prohibited Item',                'Sale',      300,   200,   14,  NULL,         'Rejected', '2026-06-30', '2026-07-02', 0, NULL),
+(19, 28,   'Inappropriate Service',          'Service',   350,   220,   14,  NULL,         'Rejected', '2026-07-06', '2026-07-08', 0, NULL),
+(19, 28,   'Giant Ad',                       'Tutorship', 3500,  2100,  14,  NULL,         'Rejected', '2026-07-07', '2026-07-09', 0, NULL),
+(19, 26,   'Unverified Cash Offer',          'Other',     300,   200,   14,  NULL,         'Rejected', '2026-07-12', '2026-07-14', 0, NULL),
+(29, 22,   'Off-Campus Solicitation',        'Other',     300,   200,   14,  NULL,         'Rejected', '2026-07-15', '2026-07-17', 0, NULL);
 GO
 
 -- Insert 7 Boards
@@ -214,7 +224,7 @@ GO
 
 -- Insert 47 Messages
 INSERT INTO Messages (SenderID, AdID, TimeLogged, RecipientID, Content) VALUES
--- Ad 1: Textbook for Sale (poster 1, John Smith, non-member)
+-- Ad 1: Textbook for Sale (poster 1)
 (5 , 1 , '2026-06-17 10:30:00', 1 , 'Is this textbook still available?'),
 (1 , 1 , '2026-06-17 11:15:00', 5 , 'Yes! It is in great condition.'),
 (5 , 1 , '2026-06-17 11:45:00', 1 , 'Great, would you take $40 for it?'),
@@ -223,19 +233,19 @@ INSERT INTO Messages (SenderID, AdID, TimeLogged, RecipientID, Content) VALUES
 (7 , 1 , '2026-06-18 09:00:00', 1 , 'Hi, is this textbook still up for grabs?'),
 (1 , 1 , '2026-06-18 09:20:00', 7 , 'Sorry, already sold it to someone else!'),
 
--- Ad 2: Roommate Wanted (poster 5, Emma Johnson, Student)
+-- Ad 2: Roommate Wanted (poster 4 -> 5)
 (6 , 2 , '2026-06-22 14:20:00', 5 , 'I am interested in being your roommate. Can we meet?'),
 (5 , 2 , '2026-06-22 15:05:00', 6 , 'Sure, are you free Thursday evening?'),
 
--- Ad 3: Tutoring Services (poster 6, Liam Davis, Student)
+-- Ad 3: Tutoring Services (poster 5 -> 6)
 (7 , 3 , '2026-06-24 09:45:00', 6 , 'What subjects do you tutor?'),
 (6 , 3 , '2026-06-24 16:30:00', 7 , 'I tutor Math, Physics, and Engineering courses.'),
 
--- Ad 4: Campus Event DJ (poster 7, Olivia Garcia, Student)
+-- Ad 4: Campus Event DJ (poster 6 -> 7)
 (8 , 4 , '2026-06-27 12:00:00', 7 , 'Are you available for a weekend event?'),
 (7 , 4 , '2026-06-27 13:15:00', 8 , 'Most weekends in July are open. What date?'),
 
--- Ad 5: Used Laptop (poster 8, Noah Martinez, Student)
+-- Ad 5: Used Laptop (poster 7 -> 8)
 (9 , 5 , '2026-06-30 08:15:00', 8 , 'What are the specs on this laptop?'),
 (8 , 5 , '2026-06-30 08:40:00', 9 , 'It is a 2022 model, 16GB RAM, 512GB SSD, barely used.'),
 (9 , 5 , '2026-06-30 09:10:00', 8 , 'Does the battery still hold a charge well?'),
@@ -243,53 +253,53 @@ INSERT INTO Messages (SenderID, AdID, TimeLogged, RecipientID, Content) VALUES
 (3 , 5 , '2026-07-01 14:00:00', 8 , 'Would you be willing to ship it to me?'),
 (8 , 5 , '2026-07-01 14:30:00', 3 , 'Sorry, local pickup only for this one.'),
 
--- Ad 7: Lab Equipment Sale (poster 9, Ava Rodriguez, Student)
+-- Ad 7: Lab Equipment Sale (poster 8 -> 9)
 (12, 7 , '2026-07-05 11:50:00', 9 , 'Is the lab equipment still for sale?'),
 (9 , 7 , '2026-07-05 13:20:00', 12, 'Yes, most of it. What were you looking for specifically?'),
 
--- Ad 8: Bike for Sale (poster 2, Sarah Williams, non-member)
+-- Ad 8: Bike for Sale (poster 2)
 (21, 8 , '2026-07-06 10:15:00', 2 , 'What size frame is the bike?'),
 (2 , 8 , '2026-07-06 11:00:00', 21, 'It is a 54cm, good for someone around 5 foot 9.'),
 
--- Ad 9: Apartment Sublet (poster 10, Ethan Wilson, Student)
+-- Ad 9: Apartment Sublet (poster 9 -> 10)
 (14, 9 , '2026-07-07 17:40:00', 10, 'When is the apartment available?'),
 (20, 9 , '2026-07-08 09:30:00', 10, 'Is the sublet furnished?'),
 (10, 9 , '2026-07-08 10:05:00', 20, 'Partially, the bedroom furniture stays.'),
 
--- Ad 10: Guitar Lessons (poster 11, Sophia Anderson, Student)
+-- Ad 10: Guitar Lessons (poster 10 -> 11)
 (17, 10, '2026-07-08 13:25:00', 11, 'What is your hourly rate for lessons?'),
 (20, 10, '2026-07-09 15:40:00', 11, 'Do you teach classical or only contemporary?'),
 
--- Ad 11: Math Tutor Available (poster 12, Mason Taylor, Student)
+-- Ad 11: Math Tutor Available (poster 11 -> 12)
 (15, 11, '2026-07-09 10:00:00', 12, 'Do you tutor calculus for first-year engineering students?'),
 (12, 11, '2026-07-09 10:20:00', 15, 'Yes, I focus mostly on Calc I and II. When are you looking to start?'),
 (15, 11, '2026-07-09 10:35:00', 12, 'This week if possible, I have a midterm coming up.'),
 
--- Ad 13: Photography Services (poster 13, Isabella Thomas, Student)
+-- Ad 13: Photography Services (poster 12 -> 13)
 (16, 13, '2026-07-11 16:00:00', 13, 'Are you available to shoot a graduation event in December?'),
 (13, 13, '2026-07-11 17:20:00', 16, 'December is wide open right now, send me the details.'),
 
--- Ad 14: Colloquium: Quantum Matter (poster 30, Thomas Okafor, Faculty)
+-- Ad 14: Colloquium: Quantum Matter (poster 30, Faculty)
 (18, 14, '2026-07-12 09:10:00', 30, 'Is the colloquium open to undergraduates?'),
 (30, 14, '2026-07-12 10:45:00', 18, 'Yes, all are welcome. No registration needed.'),
 (21, 14, '2026-07-13 14:00:00', 30, 'Will there be a recording posted afterward?'),
 (30, 14, '2026-07-13 16:30:00', 21, 'We plan to record it and post the link to the department page.'),
 
--- Ad 15: Summer Concert on the Green (poster 31, Helen Vasquez, Administration)
+-- Ad 15: Summer Concert on the Green (poster 31, Administration)
 (20, 15, '2026-07-13 11:00:00', 31, 'Are student performers still being accepted?'),
 (31, 15, '2026-07-13 12:15:00', 20, 'We have two slots left, email me a sample recording.'),
 (19, 15, '2026-07-14 18:20:00', 31, 'Is there seating or should we bring blankets?'),
 (31, 15, '2026-07-15 08:50:00', 19, 'Bring blankets, it is lawn seating only.'),
 
--- Ad 16: Guest Lecture: Urban Policy (poster 23, Emily Clark, Faculty)
+-- Ad 16: Guest Lecture: Urban Policy (poster 20 -> 23, Faculty)
 (17, 16, '2026-07-14 13:30:00', 23, 'Does the guest lecture count for course credit?'),
 (23, 16, '2026-07-14 15:00:00', 17, 'Not for credit, but attendance is noted for the seminar series.'),
 
--- Ad 17: Winter Tires (poster 4, Rebecca Foster, non-member)
+-- Ad 17: Winter Tires (poster 27 -> 4, non-member)
 (10, 17, '2026-07-15 10:20:00', 4 , 'What size are the tires and how much tread is left?'),
 (4 , 17, '2026-07-15 11:40:00', 10, 'They are 205/55R16, roughly 70 percent tread remaining.'),
 
--- Ad 18: Piano Accompanist Available (poster 20, Nathan Reid, Student)
+-- Ad 18: Piano Accompanist Available (poster 28 -> 20)
 (30, 18, '2026-07-16 09:00:00', 20, 'Would you be available to accompany a recital in the fall?'),
 (20, 18, '2026-07-16 10:30:00', 30, 'Yes, I have availability. What repertoire?');
 GO
