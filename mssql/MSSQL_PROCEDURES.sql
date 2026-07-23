@@ -859,7 +859,7 @@ BEGIN
     IF @_ReviewerID IS NULL OR @_ReviewerID NOT IN (
         SELECT PersonID FROM Employee WHERE IsReviewer = 1)
     BEGIN
-        RAISERROR('Invalid Reviewer ID. Only a Reviewer can evaluate an ad.', 16, 1);
+        RAISERROR('Invalid Reviewer ID. Only a Reviewer can delete an ad.', 16, 1);
         RETURN;
     END
 

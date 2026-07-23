@@ -911,7 +911,7 @@ BEGIN
         SELECT PersonID FROM Employee WHERE IsReviewer = 1
     ) THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Invalid Reviewer ID. Only a Reviewer can evaluate an ad.';
+            SET MESSAGE_TEXT = 'Invalid Reviewer ID. Only a Reviewer can delete an ad.';
     END IF;
 
     SELECT COUNT(*) INTO v_PostedCount
