@@ -385,6 +385,51 @@ DELIMITER ;
 
 -- -------------------------------------------------------------------------------
 
+-- Edit a person's core contact info (FirstName, LastName, Phone, Email).
+--      Does not touch role-specific fields (Department, Major, OfficeLocation,
+--      Extension, PositionTitle) -- those belong to CollegeMember/Student/
+--      Employee and have no editor here.
+DROP PROCEDURE IF EXISTS EditUserCoreInfo;
+
+DELIMITER $$
+
+CREATE PROCEDURE EditUserInfo (
+    IN p_PersonID  INT,
+    IN p_FirstName VARCHAR(50),
+    IN p_LastName  VARCHAR(50),
+    IN p_Phone     CHAR(10),
+    IN p_Email     VARCHAR(50)
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No person exists with the given PersonID.';
+    END IF;
+
+    IF p_FirstName IS NULL OR TRIM(p_FirstName) = ''
+       OR p_LastName IS NULL OR TRIM(p_LastName) = '' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: First and last name are required.';
+    END IF;
+
+    IF p_Email IS NULL OR TRIM(p_Email) = '' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Email is required.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM Person WHERE Email = p_Email AND PersonID <> p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: A person with the given email already exists.';
+    END IF;
+
+    UPDATE Person
+    SET FirstName = p_FirstName,
+        LastName  = p_LastName,
+        Phone     = p_Phone,
+        Email     = p_Email
+    WHERE PersonID = p_PersonID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
 -- Set IsReviewer role for an employee. Only flips the flag on an existing
 --      Employee row; see GrantEmployeeRole to create that row in the first place.
 DROP PROCEDURE IF EXISTS SetReviewerPermission;
@@ -559,6 +604,59 @@ BEGIN
     VALUES (p_PosterID, p_Title, p_AdType, p_AdLength, p_AdWidth, IFNULL(p_Duration, 14));
 
     SET p_AdID = LAST_INSERT_ID();
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Full detail view for any ad(s) by AdID, not just those pending review.
+--      Pass a comma-separated list of AdIDs, or NULL for every ad. Board
+--      location is intentionally omitted -- pair with GetAdPostings for that,
+--      since joining Ad_Posted_Board here would multiply rows for any ad
+--      posted to more than one board.
+DROP PROCEDURE IF EXISTS GetAdDetails;
+
+DELIMITER $$
+
+CREATE PROCEDURE GetAdDetails (
+    IN p_AdIDList TEXT
+)
+BEGIN
+    IF p_AdIDList IS NOT NULL THEN
+        SET p_AdIDList = REPLACE(p_AdIDList, ' ', '');
+    END IF;
+
+    SELECT
+        A.AdID,
+        A.Title,
+        A.AdType,
+        A.AdLength,
+        A.AdWidth,
+        A.Duration,
+        A.ReviewStatus,
+        A.EnteredPending,
+        A.ReviewDate,
+        A.PostDate,
+        A.IsWithdrawn,
+        A.WithdrawnDate,
+        A.ImageFile,
+        CONCAT(P.FirstName, ' ', P.LastName) AS PosterName,
+        P.Email AS PosterEmail,
+        P.Phone AS PosterPhone,
+        CASE WHEN E.PersonID IS NOT NULL
+             THEN CONCAT(RP.FirstName, ' ', RP.LastName)
+             ELSE 'No reviewer on record'
+        END AS ReviewerName
+    FROM
+        Ad AS A
+        INNER JOIN Person AS P ON A.PosterID = P.PersonID
+        LEFT JOIN Employee AS E ON A.ReviewerID = E.PersonID
+        LEFT JOIN Person AS RP ON E.PersonID = RP.PersonID
+    WHERE
+        p_AdIDList IS NULL
+        OR FIND_IN_SET(A.AdID, p_AdIDList) > 0
+    ORDER BY A.AdID;
 END$$
 
 DELIMITER ;

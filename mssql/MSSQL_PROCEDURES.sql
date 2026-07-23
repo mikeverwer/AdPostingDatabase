@@ -63,7 +63,6 @@ BEGIN
 
     SET @_PersonID = SCOPE_IDENTITY();
 END
-GO
 
 -- -------------------------------------------------------------------------------
 GO
@@ -372,7 +371,53 @@ BEGIN
 
     DELETE FROM Employee WHERE PersonID = @_PersonID;
 END
+
+-- -------------------------------------------------------------------------------
 GO
+-- Edit a person's core contact info (FirstName, LastName, Phone, Email).
+--      Does not touch role-specific fields (Department, Major, OfficeLocation,
+--      Extension, PositionTitle) -- those belong to CollegeMember/Student/
+--      Employee and have no editor here.
+CREATE OR ALTER PROCEDURE EditUserCoreInfo
+    @_PersonID  INT,
+    @_FirstName VARCHAR(50),
+    @_LastName  VARCHAR(50),
+    @_Phone     CHAR(10)    = NULL,
+    @_Email     VARCHAR(50)
+AS
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = @_PersonID)
+    BEGIN
+        RAISERROR('Error: No person exists with the given PersonID.', 16, 1);
+        RETURN;
+    END
+
+    IF @_FirstName IS NULL OR LTRIM(RTRIM(@_FirstName)) = ''
+       OR @_LastName IS NULL OR LTRIM(RTRIM(@_LastName)) = ''
+    BEGIN
+        RAISERROR('Error: First and last name are required.', 16, 1);
+        RETURN;
+    END
+
+    IF @_Email IS NULL OR LTRIM(RTRIM(@_Email)) = ''
+    BEGIN
+        RAISERROR('Error: Email is required.', 16, 1);
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM Person WHERE Email = @_Email AND PersonID <> @_PersonID)
+    BEGIN
+        RAISERROR('Error: A person with the given email already exists.', 16, 1);
+        RETURN;
+    END
+
+    UPDATE Person
+    SET FirstName = @_FirstName,
+        LastName  = @_LastName,
+        Phone     = @_Phone,
+        Email     = @_Email
+    WHERE PersonID = @_PersonID;
+END
 
 -- -------------------------------------------------------------------------------
 GO
@@ -536,7 +581,49 @@ BEGIN
 
     SET @_AdID = SCOPE_IDENTITY();
 END
+
+-- -------------------------------------------------------------------------------
 GO
+-- Full detail view for any ad(s) by AdID, not just those pending review.
+--      Pass a comma-separated list of AdIDs, or NULL for every ad. Board
+--      location is intentionally omitted -- pair with GetAdPostings for that,
+--      since joining Ad_Posted_Board here would multiply rows for any ad
+--      posted to more than one board.
+CREATE OR ALTER PROCEDURE GetAdDetails
+    @_AdIDList VARCHAR(MAX) = NULL
+AS
+BEGIN
+    SELECT
+        A.AdID,
+        A.Title,
+        A.AdType,
+        A.AdLength,
+        A.AdWidth,
+        A.Duration,
+        A.ReviewStatus,
+        A.EnteredPending,
+        A.ReviewDate,
+        A.PostDate,
+        A.IsWithdrawn,
+        A.WithdrawnDate,
+        A.ImageFile,
+        CONCAT(P.FirstName, ' ', P.LastName) AS PosterName,
+        P.Email AS PosterEmail,
+        P.Phone AS PosterPhone,
+        CASE WHEN E.PersonID IS NOT NULL
+             THEN CONCAT(RP.FirstName, ' ', RP.LastName)
+             ELSE 'No reviewer on record'
+        END AS ReviewerName
+    FROM
+        Ad AS A
+        INNER JOIN Person AS P ON A.PosterID = P.PersonID
+        LEFT JOIN Employee AS E ON A.ReviewerID = E.PersonID
+        LEFT JOIN Person AS RP ON E.PersonID = RP.PersonID
+    WHERE
+        @_AdIDList IS NULL
+        OR A.AdID IN (SELECT CAST(LTRIM(RTRIM(value)) AS INT) FROM STRING_SPLIT(@_AdIDList, ','))
+    ORDER BY A.AdID;
+END
 
 -- -------------------------------------------------------------------------------
 GO

@@ -127,6 +127,19 @@ RevokeEmployeeRole
   )
   ```
 
+UpdateUserCoreInfo
+: Edit a person's core contact info (FirstName, LastName, Phone, Email). Does not touch role-specific fields (Department, Major, OfficeLocation, Extension, PositionTitle) those belong to CollegeMember/Student/Employee and have no editor here.  
+: Signature (engine-agnostic):
+  ```
+  UpdateUserCoreInfo(
+    IN  PersonID    integer       [required]
+    IN  FirstName   string(50)    [required]
+    IN  LastName    string(50)    [required]
+    IN  Phone       string(10)    = null [optional]
+    IN  Email       string(50)    [required]
+  )
+  ```
+
 SetReviewerPermission
 : Set IsReviewer role for an employee. Only flips the flag on an existing Employee row; see GrantEmployeeRole to create that row in the first place.
 : Signature (engine-agnostic):
