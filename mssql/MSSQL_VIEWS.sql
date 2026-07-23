@@ -319,3 +319,10 @@ GROUP BY
     P.FirstName, 
     P.LastName;
 GO
+
+-- =============================================================================
+-- Lookups & Search
+-- Read-only search helpers for finding records by human-friendly criteria
+-- rather than raw primary keys. No views currently live here; all Lookups &
+-- Search procedures are in MSSQL_PROCEDURES.sql.
+-- =============================================================================

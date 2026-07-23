@@ -393,7 +393,7 @@ DROP PROCEDURE IF EXISTS EditUserCoreInfo;
 
 DELIMITER $$
 
-CREATE PROCEDURE EditUserInfo (
+CREATE PROCEDURE EditUserCoreInfo (
     IN p_PersonID  INT,
     IN p_FirstName VARCHAR(50),
     IN p_LastName  VARCHAR(50),
@@ -423,6 +423,103 @@ BEGIN
         LastName  = p_LastName,
         Phone     = p_Phone,
         Email     = p_Email
+    WHERE PersonID = p_PersonID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Edit a College Member's CollegeID and/or Department.
+--      Does not create College Member status -- see GrantCollegeMemberRole/
+--      AddCollegeMember for that. PersonID must already hold the role.
+DROP PROCEDURE IF EXISTS EditCollegeMemberInfo;
+
+DELIMITER $$
+
+CREATE PROCEDURE EditCollegeMemberInfo (
+    IN p_PersonID   INT,
+    IN p_CollegeID  CHAR(9),
+    IN p_Department VARCHAR(50)
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM CollegeMember WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person does not currently hold College Member status.';
+    END IF;
+
+    IF p_CollegeID IS NULL OR TRIM(p_CollegeID) = '' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: College ID is required.';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM CollegeMember WHERE CollegeID = p_CollegeID AND PersonID <> p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: A college member with the given College ID already exists.';
+    END IF;
+
+    UPDATE CollegeMember
+    SET CollegeID  = p_CollegeID,
+        Department = p_Department
+    WHERE PersonID = p_PersonID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Edit a Student's Major. PersonID must already hold Student status -- see
+--      GrantStudentRole/AddStudent for that.
+DROP PROCEDURE IF EXISTS EditStudentInfo;
+
+DELIMITER $$
+
+CREATE PROCEDURE EditStudentInfo (
+    IN p_PersonID INT,
+    IN p_Major    VARCHAR(60)
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Student WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person does not currently hold Student status.';
+    END IF;
+
+    UPDATE Student
+    SET Major = p_Major
+    WHERE PersonID = p_PersonID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Edit an Employee's OfficeLocation, Extension, and PositionTitle.
+--      Does not touch IsReviewer -- see SetReviewerPermission for that, kept
+--      separate so the reviewer flag has exactly one setter. PersonID must
+--      already hold Employee status -- see GrantEmployeeRole/AddEmployee.
+DROP PROCEDURE IF EXISTS EditEmployeeInfo;
+
+DELIMITER $$
+
+CREATE PROCEDURE EditEmployeeInfo (
+    IN p_PersonID       INT,
+    IN p_OfficeLocation VARCHAR(15),
+    IN p_Extension      VARCHAR(6),
+    IN p_PositionTitle  VARCHAR(20)
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Employee WHERE PersonID = p_PersonID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This person does not currently hold Employee status.';
+    END IF;
+
+    IF p_PositionTitle NOT IN ('Faculty', 'Administration', 'Staff', 'Support', 'Specialized') THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Invalid position title. Allowed values are Faculty, Administration, Staff, Support, or Specialized.';
+    END IF;
+
+    IF p_Extension IS NOT NULL AND p_OfficeLocation IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: An extension cannot be assigned without an office location.';
+    END IF;
+
+    UPDATE Employee
+    SET OfficeLocation = p_OfficeLocation,
+        Extension      = p_Extension,
+        PositionTitle  = p_PositionTitle
     WHERE PersonID = p_PersonID;
 END$$
 
@@ -640,7 +737,7 @@ BEGIN
         A.PostDate,
         A.IsWithdrawn,
         A.WithdrawnDate,
-        A.ImageFile,
+        A.ImageFileName,
         CONCAT(P.FirstName, ' ', P.LastName) AS PosterName,
         P.Email AS PosterEmail,
         P.Phone AS PosterPhone,
@@ -987,6 +1084,80 @@ DELIMITER ;
 
 -- -------------------------------------------------------------------------------
 
+-- Edit a board's dimensions and/or location.
+--      Refuses to shrink below the area currently occupied by posted ads --
+--      unpost some first, or choose a larger size.
+--      Location changes rely on fk_adpostedboard_board's ON UPDATE CASCADE:
+--      changing Board's key here automatically updates every matching
+--      Ad_Posted_Board row to follow, so posted ads move with the board
+--      instead of requiring the unpost/new-board/repost workaround.
+--      This procedure must be called inside a transaction the CALLER controls.
+DROP PROCEDURE IF EXISTS EditBoardDetails;
+
+DELIMITER $$
+
+CREATE PROCEDURE EditBoardDetails (
+    IN p_Building       VARCHAR(4),
+    IN p_BldgFloor      INT,
+    IN p_Slot           CHAR(1),
+    IN p_NewBuilding    VARCHAR(4),
+    IN p_NewBldgFloor   INT,
+    IN p_NewSlot        CHAR(1),
+    IN p_NewBoardLength INT,
+    IN p_NewBoardWidth  INT
+)
+BEGIN
+    DECLARE v_UsedArea INT;
+    DECLARE v_NewArea  INT;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM Board
+        WHERE Building = p_Building AND BldgFloor = p_BldgFloor AND Slot = p_Slot
+        FOR UPDATE
+    ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No board exists at the given location.';
+    END IF;
+
+    IF p_NewBoardLength IS NULL OR p_NewBoardLength <= 0
+       OR p_NewBoardWidth IS NULL OR p_NewBoardWidth <= 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Board length and width must both be positive.';
+    END IF;
+
+    SELECT COALESCE(SUM(A.AdWidth * A.AdLength), 0) INTO v_UsedArea
+    FROM 
+        Ad_Posted_Board AS APB
+        INNER JOIN Ad AS A ON APB.AdID = A.AdID
+    WHERE APB.Building = p_Building AND APB.BldgFloor = p_BldgFloor AND APB.Slot = p_Slot
+    FOR UPDATE;
+
+    SET v_NewArea = p_NewBoardLength * p_NewBoardWidth;
+
+    IF v_NewArea < v_UsedArea THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Error: New area is smaller than the area currently occupied by posted ads. Unpost some ads first, or choose a larger size.';
+    END IF;
+
+    IF (p_NewBuilding <> p_Building OR p_NewBldgFloor <> p_BldgFloor OR p_NewSlot <> p_Slot)
+       AND EXISTS (
+            SELECT 1 FROM Board
+            WHERE Building = p_NewBuilding AND BldgFloor = p_NewBldgFloor AND Slot = p_NewSlot
+       ) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: A board already exists at the new location.';
+    END IF;
+
+    UPDATE Board
+    SET Building    = p_NewBuilding,
+        BldgFloor   = p_NewBldgFloor,
+        Slot        = p_NewSlot,
+        BoardLength = p_NewBoardLength,
+        BoardWidth  = p_NewBoardWidth
+    WHERE Building = p_Building AND BldgFloor = p_BldgFloor AND Slot = p_Slot;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
 -- Create a procedure to post an ad to a given board
     -- this implementation assumes that the user has confirmed 
     -- that the ad will fit on the board separately.
@@ -1299,6 +1470,159 @@ BEGIN
 
     DELETE FROM Messages WHERE AdID = p_AdID;
     SET p_DeletedCount = ROW_COUNT();
+END$$
+
+DELIMITER ;
+
+-- =============================================================================
+-- Lookups & Search
+-- Read-only search helpers for finding records by more human-friendly
+-- criteria than raw primary keys: poster name, ad title, person name, and
+-- message participant name. Every name match here accepts a first name, a
+-- last name, or the full "First Last" string; title search is the only
+-- partial match, since ad titles are free text.
+-- =============================================================================
+
+-- -------------------------------------------------------------------------------
+
+-- Find ads by the poster's name (first, last, or full "First Last", exact).
+--      Returns enough to identify a result and hand its AdID or PosterID to
+--      another procedure -- GetAdDetails, GetPosterInfo, etc.
+DROP PROCEDURE IF EXISTS SearchAdsByPosterName;
+
+DELIMITER $$
+
+CREATE PROCEDURE SearchAdsByPosterName (
+    IN p_PosterName VARCHAR(101)
+)
+BEGIN
+    SELECT
+        A.AdID,
+        A.Title,
+        A.AdType,
+        A.ReviewStatus,
+        A.PosterID,
+        CONCAT(P.FirstName, ' ', P.LastName) AS PosterName
+    FROM 
+        Ad AS A
+        INNER JOIN Person AS P ON A.PosterID = P.PersonID
+    WHERE 
+        P.FirstName = p_PosterName 
+        OR P.LastName = p_PosterName
+        OR CONCAT(P.FirstName, ' ', P.LastName) = p_PosterName
+    ORDER BY A.AdID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Find ads whose title contains the given text (case-sensitivity follows the
+--      database's default collation). Unlike every other search here, this
+--      is a partial match, since ad titles are free text -- known
+--      simplification: a search term containing a literal % or _ will be
+--      interpreted as a wildcard rather than a literal character.
+DROP PROCEDURE IF EXISTS SearchAdsByTitle;
+
+DELIMITER $$
+
+CREATE PROCEDURE SearchAdsByTitle (
+    IN p_TitleSearch VARCHAR(128)
+)
+BEGIN
+    SELECT
+        A.AdID,
+        A.Title,
+        A.AdType,
+        A.ReviewStatus,
+        A.PosterID,
+        CONCAT(P.FirstName, ' ', P.LastName) AS PosterName
+    FROM 
+        Ad AS A
+        INNER JOIN Person AS P ON A.PosterID = P.PersonID
+    WHERE A.Title LIKE CONCAT('%', p_TitleSearch, '%')
+    ORDER BY A.AdID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Find people by name (first, last, or full "First Last", exact), with a
+--      breakdown of which roles each result currently holds.
+DROP PROCEDURE IF EXISTS SearchPeopleByName;
+
+DELIMITER $$
+
+CREATE PROCEDURE SearchPeopleByName (
+    IN p_Name VARCHAR(101)
+)
+BEGIN
+    SELECT
+        P.PersonID,
+        P.FirstName,
+        P.LastName,
+        P.Email,
+        P.Phone,
+        CASE WHEN CM.PersonID IS NOT NULL THEN 'Yes' ELSE 'No' END AS IsCollegeMember,
+        CASE WHEN S.PersonID  IS NOT NULL THEN 'Yes' ELSE 'No' END AS IsStudent,
+        CASE WHEN E.PersonID  IS NOT NULL THEN 'Yes' ELSE 'No' END AS IsEmployee,
+        CASE WHEN E.IsReviewer = 1        THEN 'Yes' ELSE 'No' END AS IsReviewer
+    FROM 
+        Person AS P
+        LEFT JOIN CollegeMember AS CM ON P.PersonID = CM.PersonID
+        LEFT JOIN Student AS S ON P.PersonID = S.PersonID
+        LEFT JOIN Employee AS E ON P.PersonID = E.PersonID
+    WHERE 
+        P.FirstName = p_Name 
+        OR P.LastName = p_Name
+        OR CONCAT(P.FirstName, ' ', P.LastName) = p_Name
+    ORDER BY P.PersonID;
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Find messages between the calling person and anyone matching the given
+--      name, restricted to conversations the searcher actually took part in.
+--      p_SearcherID must be either the sender or the recipient of any row
+--      returned -- this is a lookup over a person's own messages, not a
+--      general message browser.
+DROP PROCEDURE IF EXISTS SearchMessagesBySenderOrRecipientName;
+
+DELIMITER $$
+
+CREATE PROCEDURE SearchMessagesBySenderOrRecipientName (
+    IN p_SearcherID INT,
+    IN p_Name       VARCHAR(101)
+)
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = p_SearcherID) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No person exists with the given SearcherID.';
+    END IF;
+
+    SELECT
+        M.SenderID,
+        CONCAT(SP.FirstName, ' ', SP.LastName) AS SenderName,
+        M.RecipientID,
+        CONCAT(RP.FirstName, ' ', RP.LastName) AS RecipientName,
+        M.AdID,
+        M.Content,
+        M.TimeLogged
+    FROM 
+        Messages AS M
+        INNER JOIN Person AS SP ON M.SenderID = SP.PersonID
+        INNER JOIN Person AS RP ON M.RecipientID = RP.PersonID
+    WHERE 
+        (M.SenderID = p_SearcherID OR M.RecipientID = p_SearcherID)
+        AND (
+            SP.FirstName = p_Name OR SP.LastName = p_Name 
+            OR CONCAT(SP.FirstName, ' ', SP.LastName) = p_Name
+            OR RP.FirstName = p_Name OR RP.LastName = p_Name
+            OR CONCAT(RP.FirstName, ' ', RP.LastName) = p_Name
+        )
+    ORDER BY M.TimeLogged;
 END$$
 
 DELIMITER ;

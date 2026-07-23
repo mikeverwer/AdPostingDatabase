@@ -315,3 +315,10 @@ GROUP BY
     P.PersonID, 
     P.FirstName, 
     P.LastName;
+
+-- =============================================================================
+-- Lookups & Search
+-- Read-only search helpers for finding records by human-friendly criteria
+-- rather than raw primary keys. No views currently live here; all Lookups &
+-- Search procedures are in MySQL_PROCEDURES.sql.
+-- =============================================================================

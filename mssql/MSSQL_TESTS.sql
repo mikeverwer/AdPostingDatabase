@@ -293,6 +293,126 @@ ROLLBACK TRANSACTION;
 
 -- -------------------------------------------------------------------------------
 GO
+-- EditUserCoreInfo: update a person's core contact info
+-- Should succeed - John Smith (PersonID 1), unused new email
+BEGIN TRANSACTION;
+    EXEC EditUserCoreInfo @_PersonID = 1, @_FirstName = 'Jon', @_LastName = 'Smith',
+        @_Phone = '5551239999', @_Email = 'jon.smith@newmail.com';
+    SELECT FirstName, LastName, Phone, Email FROM Person WHERE PersonID = 1;
+ROLLBACK TRANSACTION;
+
+-- Should succeed - keeping the same email is not a collision with yourself
+BEGIN TRANSACTION;
+    EXEC EditUserCoreInfo @_PersonID = 5, @_FirstName = 'Emma', @_LastName = 'Johnson',
+        @_Phone = '5551230000', @_Email = 'emma.johnson@college.edu';
+    SELECT Phone FROM Person WHERE PersonID = 5;
+ROLLBACK TRANSACTION;
+
+-- Should fail - email collides with another real person
+BEGIN TRANSACTION;
+    DECLARE @TakenEmail VARCHAR(50);
+    SELECT TOP 1 @TakenEmail = Email FROM Person WHERE PersonID <> 1;
+    EXEC EditUserCoreInfo @_PersonID = 1, @_FirstName = 'Jon', @_LastName = 'Smith', @_Email = @TakenEmail;
+ROLLBACK TRANSACTION;
+
+-- Should fail - blank last name
+BEGIN TRANSACTION;
+    EXEC EditUserCoreInfo @_PersonID = 1, @_FirstName = 'Jon', @_LastName = '   ', @_Email = 'jon@newmail.com';
+ROLLBACK TRANSACTION;
+
+-- Should fail - no such person
+BEGIN TRANSACTION;
+    EXEC EditUserCoreInfo @_PersonID = 9999, @_FirstName = 'X', @_LastName = 'Y', @_Email = 'x@y.com';
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- EditCollegeMemberInfo: update CollegeID and/or Department
+-- Should succeed - Liam Davis (PersonID 6) is a College Member
+BEGIN TRANSACTION;
+    EXEC EditCollegeMemberInfo @_PersonID = 6, @_CollegeID = 'STU000099', @_Department = 'Physics';
+    SELECT CollegeID, Department FROM CollegeMember WHERE PersonID = 6;
+ROLLBACK TRANSACTION;
+
+-- Should succeed - keeping the same CollegeID is not a collision with yourself
+BEGIN TRANSACTION;
+    DECLARE @OwnCollegeID CHAR(9);
+    SELECT @OwnCollegeID = CollegeID FROM CollegeMember WHERE PersonID = 6;
+    EXEC EditCollegeMemberInfo @_PersonID = 6, @_CollegeID = @OwnCollegeID, @_Department = 'Renamed Dept';
+    SELECT Department FROM CollegeMember WHERE PersonID = 6;
+ROLLBACK TRANSACTION;
+
+-- Should fail - CollegeID collides with another real college member
+BEGIN TRANSACTION;
+    DECLARE @TakenCollegeID CHAR(9);
+    SELECT TOP 1 @TakenCollegeID = CollegeID FROM CollegeMember WHERE PersonID <> 6;
+    EXEC EditCollegeMemberInfo @_PersonID = 6, @_CollegeID = @TakenCollegeID;
+ROLLBACK TRANSACTION;
+
+-- Should fail - John Smith (PersonID 1) is not a College Member
+BEGIN TRANSACTION;
+    EXEC EditCollegeMemberInfo @_PersonID = 1, @_CollegeID = 'ALM000010';
+ROLLBACK TRANSACTION;
+
+-- Should fail - blank CollegeID
+BEGIN TRANSACTION;
+    EXEC EditCollegeMemberInfo @_PersonID = 6, @_CollegeID = '   ';
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- EditStudentInfo: update Major
+-- Should succeed - Liam Davis (PersonID 6) is a Student
+BEGIN TRANSACTION;
+    EXEC EditStudentInfo @_PersonID = 6, @_Major = 'Computer Science';
+    SELECT Major FROM Student WHERE PersonID = 6;
+ROLLBACK TRANSACTION;
+
+-- Should succeed - clearing Major back to undeclared
+BEGIN TRANSACTION;
+    EXEC EditStudentInfo @_PersonID = 6, @_Major = NULL;
+    SELECT Major FROM Student WHERE PersonID = 6;  -- expect NULL
+ROLLBACK TRANSACTION;
+
+-- Should fail - James Harris (PersonID 22) is an Employee, not a Student
+BEGIN TRANSACTION;
+    EXEC EditStudentInfo @_PersonID = 22, @_Major = 'Physics';
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- EditEmployeeInfo: update OfficeLocation, Extension, PositionTitle
+-- Should succeed - Thomas Okafor (PersonID 30) is an Employee
+BEGIN TRANSACTION;
+    EXEC EditEmployeeInfo @_PersonID = 30, @_OfficeLocation = 'ADM-201',
+        @_Extension = '8201', @_PositionTitle = 'Administration';
+    SELECT OfficeLocation, Extension, PositionTitle FROM Employee WHERE PersonID = 30;
+ROLLBACK TRANSACTION;
+
+-- Should succeed - clearing both office and extension together
+BEGIN TRANSACTION;
+    EXEC EditEmployeeInfo @_PersonID = 30, @_OfficeLocation = NULL,
+        @_Extension = NULL, @_PositionTitle = 'Support';
+    SELECT OfficeLocation, Extension FROM Employee WHERE PersonID = 30;  -- expect NULL, NULL
+ROLLBACK TRANSACTION;
+
+-- Should fail - Liam Davis (PersonID 6) is a Student, not an Employee
+BEGIN TRANSACTION;
+    EXEC EditEmployeeInfo @_PersonID = 6, @_PositionTitle = 'Staff';
+ROLLBACK TRANSACTION;
+
+-- Should fail - extension without an office
+BEGIN TRANSACTION;
+    EXEC EditEmployeeInfo @_PersonID = 30, @_Extension = '9999', @_PositionTitle = 'Staff';
+ROLLBACK TRANSACTION;
+
+-- Should fail - invalid position title
+BEGIN TRANSACTION;
+    EXEC EditEmployeeInfo @_PersonID = 30, @_PositionTitle = 'Custodian';
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
 -- SetReviewerPermission: toggle the IsReviewer flag on an existing Employee
 -- Should succeed - Thomas Okafor (PersonID 30) is an Employee, not yet a reviewer
 BEGIN TRANSACTION;
@@ -434,6 +554,23 @@ BEGIN TRANSACTION;
         @_AdLength = 100, @_AdWidth = 100,  @_ImageFileName = '',
         @_AdID = @NoImageAd OUTPUT;
 ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- GetAdDetails: full detail lookup by AdID list, or every ad if NULL
+-- Should succeed - NULL returns every ad
+EXEC GetAdDetails @_AdIDList = NULL;
+
+-- Should succeed - single AdID
+EXEC GetAdDetails @_AdIDList = '1';
+
+-- Should succeed - mix of existing and nonexistent AdIDs: 9999 is silently
+-- omitted rather than raising, since the list is a filter, not a validation
+EXEC GetAdDetails @_AdIDList = '1, 19, 9999, 25';
+-- expect exactly 3 rows: AdID 1, 19, 25
+
+-- Should succeed - stray whitespace around list entries is tolerated
+EXEC GetAdDetails @_AdIDList = ' 1 ,  19  ';
 
 -- -------------------------------------------------------------------------------
 GO
@@ -700,6 +837,67 @@ ROLLBACK TRANSACTION;
 
 -- -------------------------------------------------------------------------------
 GO
+-- EditBoardDetails: update a board's dimensions and/or location
+-- Should succeed - dimensions only, no location change (BLD-1-A holds AdID 1)
+BEGIN TRANSACTION;
+    EXEC EditBoardDetails
+        @_Building = 'BLD', @_BldgFloor = 1, @_Slot = 'A',
+        @_NewBuilding = 'BLD', @_NewBldgFloor = 1, @_NewSlot = 'A',
+        @_NewBoardLength = 2500, @_NewBoardWidth = 1800;
+    SELECT * FROM Board WHERE Building = 'BLD' AND BldgFloor = 1 AND Slot = 'A';
+    SELECT COUNT(*) AS StillPosted FROM Ad_Posted_Board
+    WHERE Building = 'BLD' AND BldgFloor = 1 AND Slot = 'A';  -- unaffected, expect 1
+ROLLBACK TRANSACTION;
+
+-- Should succeed - location change; NWN-2-A holds AdID 15 and 16, and the
+-- cascade should carry both postings to the new location automatically
+BEGIN TRANSACTION;
+    EXEC EditBoardDetails
+        @_Building = 'NWN', @_BldgFloor = 2, @_Slot = 'A',
+        @_NewBuilding = 'NWN', @_NewBldgFloor = 9, @_NewSlot = 'Z',
+        @_NewBoardLength = 2000, @_NewBoardWidth = 1500;
+    SELECT COUNT(*) AS OldLocationBoardRows FROM Board
+    WHERE Building = 'NWN' AND BldgFloor = 2 AND Slot = 'A';  -- expect 0
+    SELECT COUNT(*) AS OldLocationPostings FROM Ad_Posted_Board
+    WHERE Building = 'NWN' AND BldgFloor = 2 AND Slot = 'A';  -- expect 0
+    SELECT AdID, Building, BldgFloor, Slot FROM Ad_Posted_Board
+    WHERE AdID IN (15, 16);  -- both should now show NWN-9-Z
+ROLLBACK TRANSACTION;
+
+-- Should fail - BLD-1-A holds AdID 1 (300x200 = 60,000 cm2); shrinking well below that
+BEGIN TRANSACTION;
+    EXEC EditBoardDetails
+        @_Building = 'BLD', @_BldgFloor = 1, @_Slot = 'A',
+        @_NewBuilding = 'BLD', @_NewBldgFloor = 1, @_NewSlot = 'A',
+        @_NewBoardLength = 10, @_NewBoardWidth = 10;
+ROLLBACK TRANSACTION;
+
+-- Should fail - new location already occupied by another real board
+BEGIN TRANSACTION;
+    EXEC EditBoardDetails
+        @_Building = 'BLD', @_BldgFloor = 1, @_Slot = 'A',
+        @_NewBuilding = 'NWN', @_NewBldgFloor = 2, @_NewSlot = 'A',
+        @_NewBoardLength = 2000, @_NewBoardWidth = 1500;
+ROLLBACK TRANSACTION;
+
+-- Should fail - no board at the given (old) location
+BEGIN TRANSACTION;
+    EXEC EditBoardDetails
+        @_Building = 'XXX', @_BldgFloor = 9, @_Slot = 'Z',
+        @_NewBuilding = 'XXX', @_NewBldgFloor = 9, @_NewSlot = 'Z',
+        @_NewBoardLength = 2000, @_NewBoardWidth = 1500;
+ROLLBACK TRANSACTION;
+
+-- Should fail - non-positive new dimensions
+BEGIN TRANSACTION;
+    EXEC EditBoardDetails
+        @_Building = 'BLD', @_BldgFloor = 1, @_Slot = 'A',
+        @_NewBuilding = 'BLD', @_NewBldgFloor = 1, @_NewSlot = 'A',
+        @_NewBoardLength = 0, @_NewBoardWidth = 1500;
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
 -- PostAd: place an approved ad on a board
 -- Should succeed - AdID 19 is Approved but not yet posted anywhere
 BEGIN TRANSACTION;
@@ -902,3 +1100,66 @@ BEGIN TRANSACTION;
     DECLARE @BadDeleted INT;
     EXEC DeleteAdMessages @_AdID = 9999, @_DeletedCount = @BadDeleted OUTPUT;
 ROLLBACK TRANSACTION;
+
+-- =============================================================================
+-- Lookups & Search
+-- Read-only search helpers for finding records by more human-friendly
+-- criteria than raw primary keys: poster name, ad title, person name, and
+-- message participant name. Every name match here accepts a first name, a
+-- last name, or the full "First Last" string; title search is the only
+-- partial match, since ad titles are free text.
+-- =============================================================================
+
+-- -------------------------------------------------------------------------------
+GO
+-- SearchAdsByPosterName: find ads by poster first/last/full name
+-- Should succeed - last name match finds John Smith's ad
+EXEC SearchAdsByPosterName @_PosterName = 'Smith';
+
+-- Should succeed - full name match finds the same result
+EXEC SearchAdsByPosterName @_PosterName = 'John Smith';
+
+-- Should succeed - no match returns no rows, not an error
+EXEC SearchAdsByPosterName @_PosterName = 'Nonexistent';
+
+-- -------------------------------------------------------------------------------
+GO
+-- SearchAdsByTitle: partial match on ad title
+-- Should succeed - matches every ad with "Sale" in the title
+EXEC SearchAdsByTitle @_TitleSearch = 'Sale';
+
+-- Should succeed - case-insensitivity follows default collation
+EXEC SearchAdsByTitle @_TitleSearch = 'sale';
+
+-- Should succeed - no match returns no rows, not an error
+EXEC SearchAdsByTitle @_TitleSearch = 'Nonexistent Title Text';
+
+-- -------------------------------------------------------------------------------
+GO
+-- SearchPeopleByName: find people by first/last/full name, with role flags
+-- Should succeed - John Smith (PersonID 1), a non-member: all role flags 'No'
+EXEC SearchPeopleByName @_Name = 'Smith';
+
+-- Should succeed - Emma Johnson (PersonID 5): IsStudent and IsCollegeMember 'Yes'
+EXEC SearchPeopleByName @_Name = 'Johnson';
+
+-- Should succeed - no match returns no rows, not an error
+EXEC SearchPeopleByName @_Name = 'Nonexistent';
+
+-- -------------------------------------------------------------------------------
+GO
+-- SearchMessagesBySenderOrRecipientName: a person's own messages, by the
+-- other party's name
+-- Should succeed - John Smith (PersonID 1) searching for 'Johnson' finds his
+-- conversation with Emma Johnson on AdID 1
+EXEC SearchMessagesBySenderOrRecipientName @_SearcherID = 1, @_Name = 'Johnson';
+
+-- Should succeed - same conversation, found from the other side
+EXEC SearchMessagesBySenderOrRecipientName @_SearcherID = 5, @_Name = 'Smith';
+
+-- Should succeed - a real name, but the searcher wasn't part of that
+-- conversation, so it's correctly excluded rather than raising
+EXEC SearchMessagesBySenderOrRecipientName @_SearcherID = 30, @_Name = 'Johnson';
+
+-- Should fail - no such person
+EXEC SearchMessagesBySenderOrRecipientName @_SearcherID = 9999, @_Name = 'Johnson';

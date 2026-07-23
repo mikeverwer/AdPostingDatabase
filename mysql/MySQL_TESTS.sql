@@ -240,6 +240,119 @@ ROLLBACK;
 
 -- -------------------------------------------------------------------------------
 
+-- EditUserCoreInfo: update a person's core contact info
+-- Should succeed - John Smith (PersonID 1), unused new email
+START TRANSACTION;
+    CALL EditUserCoreInfo(1, 'Jon', 'Smith', '5551239999', 'jon.smith@newmail.com');
+    SELECT FirstName, LastName, Phone, Email FROM Person WHERE PersonID = 1;
+ROLLBACK;
+
+-- Should succeed - keeping the same email is not a collision with yourself
+START TRANSACTION;
+    CALL EditUserCoreInfo(5, 'Emma', 'Johnson', '5551230000', 'emma.johnson@college.edu');
+    SELECT Phone FROM Person WHERE PersonID = 5;
+ROLLBACK;
+
+-- Should fail - email collides with another real person
+START TRANSACTION;
+    SELECT Email INTO @TakenEmail FROM Person WHERE PersonID <> 1 LIMIT 1;
+    CALL EditUserCoreInfo(1, 'Jon', 'Smith', NULL, @TakenEmail);
+ROLLBACK;
+
+-- Should fail - blank last name
+START TRANSACTION;
+    CALL EditUserCoreInfo(1, 'Jon', '   ', NULL, 'jon@newmail.com');
+ROLLBACK;
+
+-- Should fail - no such person
+START TRANSACTION;
+    CALL EditUserCoreInfo(9999, 'X', 'Y', NULL, 'x@y.com');
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- EditCollegeMemberInfo: update CollegeID and/or Department
+-- Should succeed - Liam Davis (PersonID 6) is a College Member
+START TRANSACTION;
+    CALL EditCollegeMemberInfo(6, 'STU000099', 'Physics');
+    SELECT CollegeID, Department FROM CollegeMember WHERE PersonID = 6;
+ROLLBACK;
+
+-- Should succeed - keeping the same CollegeID is not a collision with yourself
+START TRANSACTION;
+    SELECT CollegeID INTO @OwnCollegeID FROM CollegeMember WHERE PersonID = 6;
+    CALL EditCollegeMemberInfo(6, @OwnCollegeID, 'Renamed Dept');
+    SELECT Department FROM CollegeMember WHERE PersonID = 6;
+ROLLBACK;
+
+-- Should fail - CollegeID collides with another real college member
+START TRANSACTION;
+    SELECT CollegeID INTO @TakenCollegeID FROM CollegeMember WHERE PersonID <> 6 LIMIT 1;
+    CALL EditCollegeMemberInfo(6, @TakenCollegeID, NULL);
+ROLLBACK;
+
+-- Should fail - John Smith (PersonID 1) is not a College Member
+START TRANSACTION;
+    CALL EditCollegeMemberInfo(1, 'ALM000010', NULL);
+ROLLBACK;
+
+-- Should fail - blank CollegeID
+START TRANSACTION;
+    CALL EditCollegeMemberInfo(6, '   ', NULL);
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- EditStudentInfo: update Major
+-- Should succeed - Liam Davis (PersonID 6) is a Student
+START TRANSACTION;
+    CALL EditStudentInfo(6, 'Computer Science');
+    SELECT Major FROM Student WHERE PersonID = 6;
+ROLLBACK;
+
+-- Should succeed - clearing Major back to undeclared
+START TRANSACTION;
+    CALL EditStudentInfo(6, NULL);
+    SELECT Major FROM Student WHERE PersonID = 6;  -- expect NULL
+ROLLBACK;
+
+-- Should fail - James Harris (PersonID 22) is an Employee, not a Student
+START TRANSACTION;
+    CALL EditStudentInfo(22, 'Physics');
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- EditEmployeeInfo: update OfficeLocation, Extension, PositionTitle
+-- Should succeed - Thomas Okafor (PersonID 30) is an Employee
+START TRANSACTION;
+    CALL EditEmployeeInfo(30, 'ADM-201', '8201', 'Administration');
+    SELECT OfficeLocation, Extension, PositionTitle FROM Employee WHERE PersonID = 30;
+ROLLBACK;
+
+-- Should succeed - clearing both office and extension together
+START TRANSACTION;
+    CALL EditEmployeeInfo(30, NULL, NULL, 'Support');
+    SELECT OfficeLocation, Extension FROM Employee WHERE PersonID = 30;  -- expect NULL, NULL
+ROLLBACK;
+
+-- Should fail - Liam Davis (PersonID 6) is a Student, not an Employee
+START TRANSACTION;
+    CALL EditEmployeeInfo(6, NULL, NULL, 'Staff');
+ROLLBACK;
+
+-- Should fail - extension without an office
+START TRANSACTION;
+    CALL EditEmployeeInfo(30, NULL, '9999', 'Staff');
+ROLLBACK;
+
+-- Should fail - invalid position title
+START TRANSACTION;
+    CALL EditEmployeeInfo(30, NULL, NULL, 'Custodian');
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
 -- SetReviewerPermission: toggle the IsReviewer flag on an existing Employee
 -- Should succeed - Thomas Okafor (PersonID 30) is an Employee, not yet a reviewer
 START TRANSACTION;
@@ -357,6 +470,23 @@ ROLLBACK;
 START TRANSACTION;
     CALL SubmitAd(1, 'Missing Image', 'Sale', 100, 0, NULL, '', @NoImageAd);
 ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
+-- GetAdDetails: full detail lookup by AdID list, or every ad if NULL
+-- Should succeed - NULL returns every ad
+CALL GetAdDetails(NULL);
+
+-- Should succeed - single AdID
+CALL GetAdDetails('1');
+
+-- Should succeed - mix of existing and nonexistent AdIDs: 9999 is silently
+-- omitted rather than raising, since the list is a filter, not a validation
+CALL GetAdDetails('1, 19, 9999, 25');
+-- expect exactly 3 rows: AdID 1, 19, 25
+
+-- Should succeed - stray whitespace around list entries is tolerated
+CALL GetAdDetails(' 1 ,  19  ');
 
 -- -------------------------------------------------------------------------------
 
@@ -602,6 +732,49 @@ ROLLBACK;
 
 -- -------------------------------------------------------------------------------
 
+-- EditBoardDetails: update a board's dimensions and/or location
+-- Should succeed - dimensions only, no location change (BLD-1-A holds AdID 1)
+START TRANSACTION;
+    CALL EditBoardDetails('BLD', 1, 'A', 'BLD', 1, 'A', 2500, 1800);
+    SELECT * FROM Board WHERE Building = 'BLD' AND BldgFloor = 1 AND Slot = 'A';
+    SELECT COUNT(*) AS StillPosted FROM Ad_Posted_Board
+    WHERE Building = 'BLD' AND BldgFloor = 1 AND Slot = 'A';  -- unaffected, expect 1
+ROLLBACK;
+
+-- Should succeed - location change; NWN-2-A holds AdID 15 and 16, and the
+-- cascade should carry both postings to the new location automatically
+START TRANSACTION;
+    CALL EditBoardDetails('NWN', 2, 'A', 'NWN', 9, 'Z', 2000, 1500);
+    SELECT COUNT(*) AS OldLocationBoardRows FROM Board
+    WHERE Building = 'NWN' AND BldgFloor = 2 AND Slot = 'A';  -- expect 0
+    SELECT COUNT(*) AS OldLocationPostings FROM Ad_Posted_Board
+    WHERE Building = 'NWN' AND BldgFloor = 2 AND Slot = 'A';  -- expect 0
+    SELECT AdID, Building, BldgFloor, Slot FROM Ad_Posted_Board
+    WHERE AdID IN (15, 16);  -- both should now show NWN-9-Z
+ROLLBACK;
+
+-- Should fail - BLD-1-A holds AdID 1 (300x200 = 60,000 cm2); shrinking well below that
+START TRANSACTION;
+    CALL EditBoardDetails('BLD', 1, 'A', 'BLD', 1, 'A', 10, 10);
+ROLLBACK;
+
+-- Should fail - new location already occupied by another real board
+START TRANSACTION;
+    CALL EditBoardDetails('BLD', 1, 'A', 'NWN', 2, 'A', 2000, 1500);
+ROLLBACK;
+
+-- Should fail - no board at the given (old) location
+START TRANSACTION;
+    CALL EditBoardDetails('XXX', 9, 'Z', 'XXX', 9, 'Z', 2000, 1500);
+ROLLBACK;
+
+-- Should fail - non-positive new dimensions
+START TRANSACTION;
+    CALL EditBoardDetails('BLD', 1, 'A', 'BLD', 1, 'A', 0, 1500);
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
 -- PostAd: place an approved ad on a board
 -- Should succeed - AdID 19 is Approved but not yet posted anywhere
 START TRANSACTION;
@@ -799,3 +972,66 @@ ROLLBACK;
 START TRANSACTION;
     CALL DeleteAdMessages(9999, @BadDeleted);
 ROLLBACK;
+
+-- =============================================================================
+-- Lookups & Search
+-- Read-only search helpers for finding records by more human-friendly
+-- criteria than raw primary keys: poster name, ad title, person name, and
+-- message participant name. Every name match here accepts a first name, a
+-- last name, or the full "First Last" string; title search is the only
+-- partial match, since ad titles are free text.
+-- =============================================================================
+
+-- -------------------------------------------------------------------------------
+
+-- SearchAdsByPosterName: find ads by poster first/last/full name
+-- Should succeed - last name match finds John Smith's ad
+CALL SearchAdsByPosterName('Smith');
+
+-- Should succeed - full name match finds the same result
+CALL SearchAdsByPosterName('John Smith');
+
+-- Should succeed - no match returns no rows, not an error
+CALL SearchAdsByPosterName('Nonexistent');
+
+-- -------------------------------------------------------------------------------
+
+-- SearchAdsByTitle: partial match on ad title
+-- Should succeed - matches every ad with "Sale" in the title
+CALL SearchAdsByTitle('Sale');
+
+-- Should succeed - case-insensitivity follows default collation
+CALL SearchAdsByTitle('sale');
+
+-- Should succeed - no match returns no rows, not an error
+CALL SearchAdsByTitle('Nonexistent Title Text');
+
+-- -------------------------------------------------------------------------------
+
+-- SearchPeopleByName: find people by first/last/full name, with role flags
+-- Should succeed - John Smith (PersonID 1), a non-member: all role flags 'No'
+CALL SearchPeopleByName('Smith');
+
+-- Should succeed - Emma Johnson (PersonID 5): IsStudent and IsCollegeMember 'Yes'
+CALL SearchPeopleByName('Johnson');
+
+-- Should succeed - no match returns no rows, not an error
+CALL SearchPeopleByName('Nonexistent');
+
+-- -------------------------------------------------------------------------------
+
+-- SearchMessagesBySenderOrRecipientName: a person's own messages, by the
+-- other party's name
+-- Should succeed - John Smith (PersonID 1) searching for 'Johnson' finds his
+-- conversation with Emma Johnson on AdID 1
+CALL SearchMessagesBySenderOrRecipientName(1, 'Johnson');
+
+-- Should succeed - same conversation, found from the other side
+CALL SearchMessagesBySenderOrRecipientName(5, 'Smith');
+
+-- Should succeed - a real name, but the searcher wasn't part of that
+-- conversation, so it's correctly excluded rather than raising
+CALL SearchMessagesBySenderOrRecipientName(30, 'Johnson');
+
+-- Should fail - no such person
+CALL SearchMessagesBySenderOrRecipientName(9999, 'Johnson');

@@ -175,7 +175,7 @@ ALTER TABLE Ad ADD CONSTRAINT fk_ad_reviewer FOREIGN KEY (ReviewerID) REFERENCES
 
 ALTER TABLE Ad_Posted_Board ADD CONSTRAINT fk_adpostedboard_ad    FOREIGN KEY (AdID) REFERENCES Ad(AdID) ON DELETE CASCADE;
 ALTER TABLE Ad_Posted_Board ADD CONSTRAINT fk_adpostedboard_board FOREIGN KEY (Building, BldgFloor, Slot)
-	REFERENCES Board(Building, BldgFloor, Slot) ON DELETE CASCADE;
+	REFERENCES Board(Building, BldgFloor, Slot) ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE Messages ADD CONSTRAINT fk_messages_sender    FOREIGN KEY (SenderID)    REFERENCES Person(PersonID);
 ALTER TABLE Messages ADD CONSTRAINT fk_messages_recipient FOREIGN KEY (RecipientID) REFERENCES Person(PersonID);

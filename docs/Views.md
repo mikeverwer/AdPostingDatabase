@@ -25,6 +25,9 @@ vw_ReviewQueue
   PosterName
   Title
   AdType
+  AdLength
+  AdWidth
+  Duration
   ImageFileName
   ```
 

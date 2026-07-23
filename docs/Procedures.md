@@ -1,7 +1,7 @@
 ## Stored Procedures
 
 ### Person & Roles
-Registering people and managing the roles they hold. Registration is layered: AddNonMember inserts a bare Person, AddCollegeMember wraps it, and AddStudent / AddEmployee wrap that in turn. The Grant/Revoke pairs move an existing person between roles without re-registering them. Also holds the two contact-lookup procedures.
+Registering people and managing the roles they hold. Registration is layered: AddNonMember inserts a bare Person, AddCollegeMember wraps it, and AddStudent / AddEmployee wrap that in turn. The Grant/Revoke pairs move an existing person between roles without re-registering them. Also holds the core-info editors, the reviewer-flag setter, and the two contact-lookup procedures.
 
 AddNonMember
 : Add a person with no college affiliation. Inserts into Person only. Use for members of the public who post ads. This procedure must be called inside a transaction the CALLER controls.
@@ -127,16 +127,49 @@ RevokeEmployeeRole
   )
   ```
 
-UpdateUserCoreInfo
-: Edit a person's core contact info (FirstName, LastName, Phone, Email). Does not touch role-specific fields (Department, Major, OfficeLocation, Extension, PositionTitle) those belong to CollegeMember/Student/Employee and have no editor here.  
+EditUserCoreInfo
+: Edit a person's core contact info (FirstName, LastName, Phone, Email). Does not touch role-specific fields (Department, Major, OfficeLocation, Extension, PositionTitle); those belong to CollegeMember/Student/Employee and have no editor here.
 : Signature (engine-agnostic):
   ```
-  UpdateUserCoreInfo(
-    IN  PersonID    integer       [required]
-    IN  FirstName   string(50)    [required]
-    IN  LastName    string(50)    [required]
-    IN  Phone       string(10)    = null [optional]
-    IN  Email       string(50)    [required]
+  EditUserCoreInfo(
+    IN  PersonID  : integer      [required]
+    IN  FirstName : string(50)   [required, not null/empty]
+    IN  LastName  : string(50)   [required, not null/empty]
+    IN  Phone     : string(10)   = null [optional]
+    IN  Email     : string(50)   [required, not null/empty; unique]
+  )
+  ```
+
+EditCollegeMemberInfo
+: Edit a College Member's CollegeID and/or Department. Does not create College Member status; see GrantCollegeMemberRole/AddCollegeMember for that. PersonID must already hold the role.
+: Signature (engine-agnostic):
+  ```
+  EditCollegeMemberInfo(
+    IN  PersonID   : integer      [required]
+    IN  CollegeID  : string(9)    [required, not null/empty; unique]
+    IN  Department : string(50)   = null [optional]
+  )
+  ```
+
+EditStudentInfo
+: Edit a Student's Major. PersonID must already hold Student status; see GrantStudentRole/AddStudent for that.
+: Signature (engine-agnostic):
+  ```
+  EditStudentInfo(
+    IN  PersonID : integer      [required]
+    IN  Major    : string(60)   = null [optional]
+  )
+  ```
+
+EditEmployeeInfo
+: Edit an Employee's OfficeLocation, Extension, and PositionTitle. Does not touch IsReviewer; see SetReviewerPermission for that, kept separate so the reviewer flag has exactly one setter. PersonID must already hold Employee status; see GrantEmployeeRole/AddEmployee.
+: Signature (engine-agnostic):
+  ```
+  EditEmployeeInfo(
+    IN  PersonID       : integer      [required]
+    IN  OfficeLocation : string(15)   = null [optional]
+    IN  Extension      : string(6)    = null [optional; requires OfficeLocation]
+    IN  PositionTitle  : string(20)   [required; must be one of: Faculty, Administration, Staff, Support, Specialized]
   )
   ```
 
@@ -169,7 +202,7 @@ GetReviewerInfo
   ```
 
 ### Ad Lifecycle & Review
-Moving an ad through its states: submission, the review decision, and poster-initiated withdrawal. Also holds the two rejection-history reports, which read the outcome of that review process.
+Moving an ad through its states: submission, the review decision, and poster-initiated withdrawal. Also holds the full-detail ad lookup and the two rejection-history reports, which read the outcome of that review process.
 
 SubmitAd
 : Submit a new ad for review. Inserts a new Ad row with ReviewStatus = 'Pending', ReviewerID = NULL, PostDate = NULL, EnteredPending = today, and ReviewDate = NULL. This procedure must be called inside a transaction the CALLER controls.
@@ -184,6 +217,15 @@ SubmitAd
     IN  Duration      : integer      = 14 [optional; > 0]
     IN  ImageFileName : string(255)  [required, not null/empty]
     OUT AdID          : integer      [assigned to the new Ad row id]
+  )
+  ```
+
+GetAdDetails
+: Full detail view for any ad(s) by AdID, not just those pending review. Pass a comma-separated list of AdIDs, or NULL for every ad. Board location is intentionally omitted; pair with GetAdPostings for that, since joining Ad_Posted_Board here would multiply rows for any ad posted to more than one board.
+: Signature (engine-agnostic):
+  ```
+  GetAdDetails(
+    IN  AdIDList : string(max)   = null [optional; comma separated string of integers]
   )
   ```
 
@@ -241,7 +283,7 @@ GetPosterRejectionHistory
   ```
 
 ### Board & Posting
-Creating and retiring the physical boards, placing approved ads onto them, removing them again, and the two read-only helpers for checking fit and looking up where an ad currently hangs.
+Creating and retiring the physical boards, editing a board's dimensions/location, placing approved ads onto them, removing them again, and the two read-only helpers for checking fit and looking up where an ad currently hangs.
 
 NewBoard
 : Add a new board. The only real constraint is that the location (Building, BldgFloor, Slot) not already be in use.
@@ -264,6 +306,22 @@ RetireBoard
     IN  Building  : string(4)   [required]
     IN  BldgFloor : integer     [required]
     IN  Slot      : string(1)   [required]
+  )
+  ```
+
+EditBoardDetails
+: Edit a board's dimensions and/or location. Refuses to shrink below the area currently occupied by posted ads; unpost some first, or choose a larger size. Location changes rely on fk_adpostedboard_board's ON UPDATE CASCADE: changing Board's key here automatically updates every matching Ad_Posted_Board row to follow, so posted ads move with the board instead of requiring the unpost/new-board/repost workaround. This procedure must be called inside a transaction the CALLER controls.
+: Signature (engine-agnostic):
+  ```
+  EditBoardDetails(
+    IN  Building       : string(4)   [required]
+    IN  BldgFloor      : integer     [required]
+    IN  Slot           : string(1)   [required]
+    IN  NewBuilding    : string(4)   [required]
+    IN  NewBldgFloor   : integer     [required]
+    IN  NewSlot        : string(1)   [required]
+    IN  NewBoardLength : integer     [required; > 0]
+    IN  NewBoardWidth  : integer     [required; > 0]
   )
   ```
 
@@ -351,5 +409,45 @@ DeleteAdMessages
   DeleteAdMessages(
     IN  AdID         : integer   [required]
     OUT DeletedCount : integer   [number of messages deleted]
+  )
+  ```
+
+### Lookups & Search
+Read-only search helpers for finding records by more human-friendly criteria than raw primary keys: poster name, ad title, person name, and message participant name. Every name match here accepts a first name, a last name, or the full "First Last" string; title search is the only partial match, since ad titles are free text.
+
+SearchAdsByPosterName
+: Find ads by the poster's name (first, last, or full "First Last", exact). Returns enough to identify a result and hand its AdID or PosterID to another procedure; GetAdDetails, GetPosterInfo, etc.
+: Signature (engine-agnostic):
+  ```
+  SearchAdsByPosterName(
+    IN  PosterName : string(101)   [required]
+  )
+  ```
+
+SearchAdsByTitle
+: Find ads whose title contains the given text (case-sensitivity follows the database's default collation). Unlike every other search here, this is a partial match, since ad titles are free text; known simplification: a search term containing a literal % or _ will be interpreted as a wildcard rather than a literal character.
+: Signature (engine-agnostic):
+  ```
+  SearchAdsByTitle(
+    IN  TitleSearch : string(128)   [required]
+  )
+  ```
+
+SearchPeopleByName
+: Find people by name (first, last, or full "First Last", exact), with a breakdown of which roles each result currently holds.
+: Signature (engine-agnostic):
+  ```
+  SearchPeopleByName(
+    IN  Name : string(101)   [required]
+  )
+  ```
+
+SearchMessagesBySenderOrRecipientName
+: Find messages between the calling person and anyone matching the given name, restricted to conversations the searcher actually took part in. SearcherID must be either the sender or the recipient of any row returned; this is a lookup over a person's own messages, not a general message browser.
+: Signature (engine-agnostic):
+  ```
+  SearchMessagesBySenderOrRecipientName(
+    IN  SearcherID : integer      [required]
+    IN  Name       : string(101)  [required]
   )
   ```
