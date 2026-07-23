@@ -384,7 +384,8 @@ BEGIN TRANSACTION;
     DECLARE @NewAd INT;
     EXEC SubmitAd
         @_PosterID = 3, @_Title = 'Kayak for Sale', @_AdType = 'Sale',
-        @_AdLength = 350, @_AdWidth = 90, @_AdID = @NewAd OUTPUT;
+        @_AdLength = 350, @_AdWidth = 90, @_ImageFileName = 'kayak.jpg', 
+        @_AdID = @NewAd OUTPUT;
     SELECT * FROM Ad WHERE AdID = @NewAd;
 ROLLBACK TRANSACTION;
 
@@ -393,7 +394,8 @@ BEGIN TRANSACTION;
     DECLARE @LongAd INT;
     EXEC SubmitAd
         @_PosterID = 5, @_Title = 'Semester-Long Tutoring', @_AdType = 'Tutorship',
-        @_AdLength = 300, @_AdWidth = 200, @_Duration = 90, @_AdID = @LongAd OUTPUT;
+        @_AdLength = 300, @_AdWidth = 200, @_Duration = 90, 
+        @_ImageFileName = 'tutor-poster.jpg', @_AdID = @LongAd OUTPUT;
     SELECT AdID, Title, Duration, ReviewStatus FROM Ad WHERE AdID = @LongAd;
 ROLLBACK TRANSACTION;
 
@@ -402,7 +404,8 @@ BEGIN TRANSACTION;
     DECLARE @BadAd INT;
     EXEC SubmitAd
         @_PosterID = 1, @_Title = 'Test', @_AdType = 'Rummage',
-        @_AdLength = 100, @_AdWidth = 100, @_AdID = @BadAd OUTPUT;
+        @_AdLength = 100, @_AdWidth = 100, @_ImageFileName = 'bad-post.jpg',
+        @_AdID = @BadAd OUTPUT;
 ROLLBACK TRANSACTION;
 
 -- Should fail - no such poster
@@ -410,7 +413,8 @@ BEGIN TRANSACTION;
     DECLARE @NoPosterAd INT;
     EXEC SubmitAd
         @_PosterID = 9999, @_Title = 'Orphan Ad', @_AdType = 'Sale',
-        @_AdLength = 100, @_AdWidth = 100, @_AdID = @NoPosterAd OUTPUT;
+        @_AdLength = 100, @_AdWidth = 100, @_ImageFileName = 'bad-post.jpg',
+        @_AdID = @NoPosterAd OUTPUT;
 ROLLBACK TRANSACTION;
 
 -- Should fail - non-positive dimensions
@@ -418,7 +422,17 @@ BEGIN TRANSACTION;
     DECLARE @ZeroAd INT;
     EXEC SubmitAd
         @_PosterID = 1, @_Title = 'Zero Width', @_AdType = 'Sale',
-        @_AdLength = 100, @_AdWidth = 0, @_AdID = @ZeroAd OUTPUT;
+        @_AdLength = 100, @_AdWidth = 0,  @_ImageFileName = 'bad-post.jpg',
+        @_AdID = @ZeroAd OUTPUT;
+ROLLBACK TRANSACTION;
+
+-- Should fail - blank image filename
+BEGIN TRANSACTION;
+    DECLARE @NoImageAd INT;
+    EXEC SubmitAd
+        @_PosterID = 1, @_Title = 'Missing Image', @_AdType = 'Sale',
+        @_AdLength = 100, @_AdWidth = 100,  @_ImageFileName = '',
+        @_AdID = @NoImageAd OUTPUT;
 ROLLBACK TRANSACTION;
 
 -- -------------------------------------------------------------------------------
@@ -469,7 +483,7 @@ BEGIN TRANSACTION;
     SELECT @Deleted AS MessagesDeleted;
     SELECT ReviewStatus, IsWithdrawn, WithdrawnDate FROM Ad WHERE AdID = 1;
     -- Board postings are deliberately left in place, and now surface for takedown
-    SELECT * FROM vw_UnapprovedPostings WHERE AdID = 1;
+    SELECT * FROM vw_PendingRemoval WHERE AdID = 1;
 ROLLBACK TRANSACTION;
 
 -- Should fail - wrong poster
@@ -489,6 +503,79 @@ ROLLBACK TRANSACTION;
 BEGIN TRANSACTION;
     DECLARE @NoAdWithdraw INT;
     EXEC WithdrawAd @_AdID = 9999, @_PosterID = 1, @_DeletedMessageCount = @NoAdWithdraw OUTPUT;
+ROLLBACK TRANSACTION;
+
+-- -------------------------------------------------------------------------------
+GO
+-- DeleteAd: permanently remove an ad, returning its image for cleanup.
+-- Moderation action -- authorization is by Reviewer status, not by poster.
+-- Should succeed - AdID 19 is Approved but not posted to any board
+BEGIN TRANSACTION;
+    DECLARE @DelMsgs INT, @DelImage VARCHAR(255);
+    EXEC DeleteAd @_AdID = 19, @_ReviewerID = 22,
+        @_DeletedMessageCount = @DelMsgs OUTPUT, @_ImageFileName = @DelImage OUTPUT;
+    SELECT @DelMsgs AS MessagesDeleted, @DelImage AS ImageToClean;
+    SELECT COUNT(*) AS AdRows FROM Ad WHERE AdID = 19;  -- expect 0
+ROLLBACK TRANSACTION;
+
+-- Should succeed - unpost first, then delete an ad that was on a board.
+-- AdID 1 has messages attached, so MessagesDeleted should be non-zero.
+BEGIN TRANSACTION;
+    DECLARE @UnpostMsgs INT, @UnpostImage VARCHAR(255);
+    EXEC UnpostAd @_AdID = 1, @_Building = 'BLD', @_BldgFloor = 1, @_Slot = 'A';
+    EXEC DeleteAd @_AdID = 1, @_ReviewerID = 26,
+        @_DeletedMessageCount = @UnpostMsgs OUTPUT, @_ImageFileName = @UnpostImage OUTPUT;
+    SELECT @UnpostMsgs AS MessagesDeleted, @UnpostImage AS ImageToClean;
+    SELECT COUNT(*) AS AdRows      FROM Ad              WHERE AdID = 1;  -- expect 0
+    SELECT COUNT(*) AS MessageRows FROM Messages        WHERE AdID = 1;  -- expect 0
+    SELECT COUNT(*) AS PostingRows FROM Ad_Posted_Board WHERE AdID = 1;  -- expect 0
+ROLLBACK TRANSACTION;
+
+-- Should succeed - a Pending ad with no messages reports zero deleted
+BEGIN TRANSACTION;
+    DECLARE @PendMsgs INT, @PendImage VARCHAR(255);
+    EXEC DeleteAd @_AdID = 25, @_ReviewerID = 28,
+        @_DeletedMessageCount = @PendMsgs OUTPUT, @_ImageFileName = @PendImage OUTPUT;
+    SELECT @PendMsgs AS MessagesDeleted;  -- expect 0
+ROLLBACK TRANSACTION;
+
+-- Should fail - AdID 1 is still posted to a board
+BEGIN TRANSACTION;
+    DECLARE @PostedMsgs INT, @PostedImage VARCHAR(255);
+    EXEC DeleteAd @_AdID = 1, @_ReviewerID = 22,
+        @_DeletedMessageCount = @PostedMsgs OUTPUT, @_ImageFileName = @PostedImage OUTPUT;
+ROLLBACK TRANSACTION;
+
+-- Should fail - PersonID 5 is a Student, not a Reviewer; a poster can no
+-- longer delete their own ad under this authorization model
+BEGIN TRANSACTION;
+    DECLARE @NonRevMsgs INT, @NonRevImage VARCHAR(255);
+    EXEC DeleteAd @_AdID = 19, @_ReviewerID = 5,
+        @_DeletedMessageCount = @NonRevMsgs OUTPUT, @_ImageFileName = @NonRevImage OUTPUT;
+ROLLBACK TRANSACTION;
+
+-- Should fail - NULL reviewer ID
+BEGIN TRANSACTION;
+    DECLARE @NullRevMsgs INT, @NullRevImage VARCHAR(255);
+    EXEC DeleteAd @_AdID = 19, @_ReviewerID = NULL,
+        @_DeletedMessageCount = @NullRevMsgs OUTPUT, @_ImageFileName = @NullRevImage OUTPUT;
+ROLLBACK TRANSACTION;
+
+-- Should fail - no such ad
+BEGIN TRANSACTION;
+    DECLARE @NoAdMsgs INT, @NoAdImage VARCHAR(255);
+    EXEC DeleteAd @_AdID = 9999, @_ReviewerID = 22,
+        @_DeletedMessageCount = @NoAdMsgs OUTPUT, @_ImageFileName = @NoAdImage OUTPUT;
+ROLLBACK TRANSACTION;
+
+-- Should succeed - deletion is permitted after withdrawal, and is the
+-- mechanism by which a withdrawn ad is eventually purged
+BEGIN TRANSACTION;
+    DECLARE @WdMsgs INT, @WdDelMsgs INT, @WdImage VARCHAR(255);
+    EXEC WithdrawAd @_AdID = 19, @_PosterID = 15, @_DeletedMessageCount = @WdMsgs OUTPUT;
+    EXEC DeleteAd @_AdID = 19, @_ReviewerID = 29,
+        @_DeletedMessageCount = @WdDelMsgs OUTPUT, @_ImageFileName = @WdImage OUTPUT;
+    SELECT COUNT(*) AS AdRows FROM Ad WHERE AdID = 19;  -- expect 0
 ROLLBACK TRANSACTION;
 
 -- -------------------------------------------------------------------------------
@@ -523,9 +610,9 @@ EXEC GetPosterRejectionHistory @_PosterID = 9999;
 
 -- -------------------------------------------------------------------------------
 GO
--- PostedAdsInfo: every ad currently on a board, with its full ad record
+-- vw_PostedAdsInfo: every ad currently on a board, with its full ad record
 SELECT *
-FROM PostedAdsInfo
+FROM vw_PostedAdsInfo
 ORDER BY Building, BldgFloor, Slot, AdID;
 
 -- -------------------------------------------------------------------------------
@@ -624,7 +711,7 @@ ROLLBACK TRANSACTION;
 BEGIN TRANSACTION;
     EXEC ReviewAd @_AdID = 25, @_Status = 'Approved', @_ReviewerID = 22;
     EXEC PostAd @_AdID = 25, @_Bldg = 'LIB', @_Floor = 1, @_Slot = 'A';
-    SELECT * FROM PostedAdsInfo WHERE AdID = 25;
+    SELECT * FROM vw_PostedAdsInfo WHERE AdID = 25;
 ROLLBACK TRANSACTION;
 
 -- Should fail - AdID 25 is Pending without the ReviewAd call above

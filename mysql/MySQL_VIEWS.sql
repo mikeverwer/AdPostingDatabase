@@ -4,10 +4,10 @@
 -- LOAD ORDER: 1 of 3
 --   MySQL_VIEWS.sql  ->  MySQL_PROCEDURES.sql  ->  MySQL_TESTS.sql
 -- Views must be created before procedures, since several procedures read from
--- them (PostAd reads vw_ExpiredAds, GetAdPostings reads PostedAdsInfo). Tests
+-- them (PostAd reads vw_ExpiredAds, GetAdPostings reads vw_PostedAdsInfo). Tests
 -- run last and depend on both.
 --
--- Within this file, Board & Posting is order-sensitive: PostedAdsInfo feeds
+-- Within this file, Board & Posting is order-sensitive: vw_PostedAdsInfo feeds
 -- vw_BoardSpace and vw_PendingRemoval (along with vw_ExpiredAds), and 
 -- vw_BoardSpace feeds vw_BoardSpaceDisplay. The categories themselves are 
 -- independent.
@@ -45,11 +45,15 @@ WHERE
 -- Create a view for the review queue
 CREATE OR REPLACE VIEW vw_ReviewQueue AS
 SELECT
+    ROW_NUMBER() OVER (ORDER BY A.EnteredPending, A.AdID) AS QueuePosition
     A.AdID,
     CONCAT(P.FirstName, ' ', P.LastName) AS PosterName,
     A.Title,
     A.AdType,
-    ROW_NUMBER() OVER (ORDER BY A.EnteredPending, A.AdID) AS QueuePosition
+    A.AdLength,
+    A.AdWidth,
+    A.Duration,
+    A.ImageFileName
 FROM
     Ad AS A
     INNER JOIN Person AS P ON A.PosterID = P.PersonID
@@ -124,6 +128,8 @@ SELECT
     SUM(CASE WHEN AdType = 'Sale'      THEN 1 ELSE 0 END) AS Sale,
     SUM(CASE WHEN AdType = 'Roommate'  THEN 1 ELSE 0 END) AS Roommate,
     SUM(CASE WHEN AdType = 'Event'     THEN 1 ELSE 0 END) AS Event,
+    SUM(CASE WHEN AdType = 'Service'   THEN 1 ELSE 0 END) AS Service,
+    SUM(CASE WHEN AdType = 'Other'     THEN 1 ELSE 0 END) AS Other,
     COUNT(*) AS RowTotal
 FROM AdsByUserType
 GROUP BY UserType WITH ROLLUP;
@@ -132,9 +138,9 @@ GROUP BY UserType WITH ROLLUP;
 -- Board & Posting
 -- Views describing the physical boards and what is currently posted to them:
 -- the posting join itself, per-board space accounting, and the two exception
--- lists (approved-but-unposted, and posted-but-no-longer-approved).
+-- lists (approved-but-unposted, and posted-but-require-removal).
 --
--- Order matters here. PostedAdsInfo must be created first; vw_BoardSpace and
+-- Order matters here. vw_PostedAdsInfo must be created first; vw_BoardSpace and
 -- vw_PendingRemoval read from it, and vw_BoardSpaceDisplay reads from
 -- vw_BoardSpace.
 -- =============================================================================
@@ -143,7 +149,7 @@ GROUP BY UserType WITH ROLLUP;
 
 -- Create a view of all ads posted to each board, joining posting location to
 -- the full ad record. This is the base view for the rest of this category.
-CREATE OR REPLACE VIEW PostedAdsInfo AS
+CREATE OR REPLACE VIEW vw_PostedAdsInfo AS
 SELECT 
 	APB.Building,
     APB.BldgFloor,
@@ -160,7 +166,8 @@ SELECT
     Ad.AdWidth,
     Ad.AdLength,
     Ad.IsWithdrawn,
-    Ad.WithdrawnDate
+    Ad.WithdrawnDate,
+    Ad.ImageFileName
 FROM 
     Ad_Posted_Board AS APB 
     INNER JOIN Ad ON APB.AdID = Ad.AdID;
@@ -183,7 +190,7 @@ SELECT
     (B.BoardWidth * B.BoardLength) - COALESCE(SUM(A.AdWidth * A.AdLength), 0) 
         AS RemainingBoardSpace
 FROM 
-    PostedAdsInfo AS A
+    vw_PostedAdsInfo AS A
     RIGHT JOIN Board AS B ON 
 		A.Building = B.Building 
         AND A.BldgFloor = B.BldgFloor 
@@ -233,7 +240,7 @@ WHERE
 --  expired ads in a ranked list of importance. Top priority is ads that have been 
 --  withdrawn, then otherwise unapproved ads, and then expired ads by DaysOverdue.
 --  This view feeds the UnPost ad workflow.
-CREATE OR ALTER VIEW vw_PendingRemoval AS
+CREATE OR REPLACE VIEW vw_PendingRemoval AS
 SELECT
     P.Building,
     P.BldgFloor,
@@ -246,6 +253,7 @@ SELECT
     P.PostDate,
     P.Duration,
     EA.DaysOverdue,
+    P.ImageFileName
     CASE
         WHEN IsWithdrawn = 1 THEN 1
         WHEN ReviewStatus <> 'Approved' THEN 2
@@ -256,7 +264,7 @@ SELECT
         WHEN ReviewStatus <> 'Approved' THEN CONCAT('Unapproved (', ReviewStatus, ')')
         ELSE 'Expired'
     END AS RemovalReason
-FROM PostedAdsInfo AS P
+FROM vw_PostedAdsInfo AS P
 LEFT JOIN vw_ExpiredAds AS EA on P.AdID = EA.AdID
 WHERE
     IsWithdrawn = 1

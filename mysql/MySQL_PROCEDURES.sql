@@ -4,7 +4,7 @@
 -- LOAD ORDER: 2 of 3
 --   MySQL_VIEWS.sql  ->  MySQL_PROCEDURES.sql  ->  MySQL_TESTS.sql
 -- Every view in MySQL_VIEWS.sql must exist before this file is run: PostAd
--- reads vw_ExpiredAds, GetAdPostings reads PostedAdsInfo, and CheckAdFit reads
+-- reads vw_ExpiredAds, GetAdPostings reads vw_PostedAdsInfo, and CheckAdFit reads
 -- vw_BoardSpace. Procedures may call one another across categories
 -- (WithdrawAd calls DeleteAdMessages), but MySQL resolves procedure bodies at
 -- execution time, so the order within this file does not matter.
@@ -442,7 +442,8 @@ BEGIN
             WHEN S.PersonID IS NOT NULL THEN COALESCE(S.Major, 'Undeclared')
             ELSE 'N/A'
         END AS Major,
-        A.AdID
+        A.AdID,
+        A.ImageFileName
     FROM 
         Person AS P
         INNER JOIN Ad AS A 
@@ -518,13 +519,14 @@ DROP PROCEDURE IF EXISTS SubmitAd;
 DELIMITER $$
 
 CREATE PROCEDURE SubmitAd (
-    IN  p_PosterID INT,
-    IN  p_Title    VARCHAR(128),
-    IN  p_AdType   VARCHAR(20),
-    IN  p_AdLength INT,
-    IN  p_AdWidth  INT,
-    IN  p_Duration INT,
-    OUT p_AdID     INT
+    IN  p_PosterID      INT,
+    IN  p_Title         VARCHAR(128),
+    IN  p_AdType        VARCHAR(20),
+    IN  p_AdLength      INT,
+    IN  p_AdWidth       INT,
+    IN  p_Duration      INT,
+    IN  p_ImageFileName VARCHAR(255),
+    OUT p_AdID          INT
 )
 BEGIN
     SET p_AdID = NULL;
@@ -547,6 +549,10 @@ BEGIN
 
     IF p_Duration IS NOT NULL AND p_Duration <= 0 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Duration must be positive.';
+    END IF;
+
+    IF p_ImageFileName IS NULL OR TRIM(p_ImageFileName) = '' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: Image file is required.';
     END IF;
 
     INSERT INTO Ad (PosterID, Title, AdType, AdLength, AdWidth, Duration)
@@ -662,6 +668,69 @@ BEGIN
     WHERE AdID = p_AdID;
 
     CALL DeleteAdMessages(p_AdID, p_DeletedMessageCount);
+END$$
+
+DELIMITER ;
+
+-- -------------------------------------------------------------------------------
+
+-- Permanently delete an ad. Admin-initiated, and distinct from WithdrawAd:
+--      withdrawal is a reversible-looking flag that preserves the ad record and
+--      its review history, while this removes the row outright. Refuses while
+--      the ad is still posted to any board, since fk_adpostedboard_ad is
+--      ON DELETE CASCADE and would otherwise silently strip it from physical
+--      boards with no takedown worklist entry -- run UnpostAd first (see
+--      vw_PendingRemoval for the ads awaiting takedown). Messages are removed
+--      explicitly via DeleteAdMessages, because fk_messages_ad is deliberately
+--      NO ACTION rather than cascading.
+--      The ad's ImageFileName is returned so the caller can clean up the stored
+--      file; the database holds only the reference, not the file itself.
+--      This procedure must be called inside a transaction the CALLER controls.
+--      This procedure is a mederation tool, not to be used for clean-up.
+DROP PROCEDURE IF EXISTS DeleteAd;
+
+DELIMITER $$
+
+CREATE PROCEDURE DeleteAd (
+    IN  p_AdID                INT,
+    IN  p_ReviewerID          INT,
+    OUT p_DeletedMessageCount INT,
+    OUT p_ImageFileName           VARCHAR(255)
+)
+BEGIN
+    DECLARE v_PostedCount    INT;
+
+    SET p_DeletedMessageCount = NULL;
+    SET p_ImageFileName = NULL;
+
+    SELECT ImageFileName INTO p_ImageFileName
+    FROM Ad
+    WHERE AdID = p_AdID
+    FOR UPDATE;
+
+    IF p_ImageFileName IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: No ad exists with the given AdID.';
+    END IF;
+
+    IF p_ReviewerID IS NULL OR p_ReviewerID NOT IN (
+        SELECT PersonID FROM Employee WHERE IsReviewer = 1
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Invalid Reviewer ID. Only a Reviewer can evaluate an ad.';
+    END IF;
+
+    SELECT COUNT(*) INTO v_PostedCount
+    FROM Ad_Posted_Board
+    WHERE AdID = p_AdID
+    FOR UPDATE;
+
+    IF v_PostedCount > 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This ad is still posted to one or more boards. Unpost it first.';
+    END IF;
+
+    CALL DeleteAdMessages(p_AdID, p_DeletedMessageCount);
+
+    DELETE FROM Ad WHERE AdID = p_AdID;
 END$$
 
 DELIMITER ;
@@ -806,6 +875,7 @@ BEGIN
     SELECT COUNT(*) INTO v_PostedCount
     FROM Ad_Posted_Board
     WHERE Building = p_Building AND BldgFloor = p_BldgFloor AND Slot = p_Slot;
+    FOR UPDATE;
 
     IF v_PostedCount > 0 THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Error: This board still has ad(s) posted to it. Unpost them first.';
@@ -972,7 +1042,7 @@ CREATE PROCEDURE GetAdPostings
 )
 BEGIN
     SELECT *
-    FROM PostedAdsInfo
+    FROM vw_PostedAdsInfo
     WHERE AdID = p_AdID;
 END$$
 

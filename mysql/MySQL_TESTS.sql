@@ -328,29 +328,34 @@ ORDER BY RowTotal DESC, UserType;
 -- SubmitAd: create a new ad in Pending status
 -- Should succeed - defaults produce Pending, no reviewer, no post date
 START TRANSACTION;
-    CALL SubmitAd(3, 'Kayak for Sale', 'Sale', 350, 90, NULL, @NewAd);
+    CALL SubmitAd(3, 'Kayak for Sale', 'Sale', 350, 90, NULL, 'kayak.jpg', @NewAd);
     SELECT * FROM Ad WHERE AdID = @NewAd;
 ROLLBACK;
 
 -- Should succeed - explicit duration overrides the default of 14
 START TRANSACTION;
-    CALL SubmitAd(5, 'Semester-Long Tutoring', 'Tutorship', 300, 200, 90, @LongAd);
+    CALL SubmitAd(5, 'Semester-Long Tutoring', 'Tutorship', 300, 200, 90, 'tutor-poster.jpg', @LongAd);
     SELECT AdID, Title, Duration, ReviewStatus FROM Ad WHERE AdID = @LongAd;
 ROLLBACK;
 
 -- Should fail - invalid ad type
 START TRANSACTION;
-    CALL SubmitAd(1, 'Test', 'Rummage', 100, 100, NULL, @BadAd);
+    CALL SubmitAd(1, 'Test', 'Rummage', 100, 100, NULL, 'bad-post.jpg', @BadAd);
 ROLLBACK;
 
 -- Should fail - no such poster
 START TRANSACTION;
-    CALL SubmitAd(9999, 'Orphan Ad', 'Sale', 100, 100, NULL, @NoPosterAd);
+    CALL SubmitAd(9999, 'Orphan Ad', 'Sale', 100, 100, NULL, 'bad-post.jpg', @NoPosterAd);
 ROLLBACK;
 
 -- Should fail - non-positive dimensions
 START TRANSACTION;
-    CALL SubmitAd(1, 'Zero Width', 'Sale', 100, 0, NULL, @ZeroAd);
+    CALL SubmitAd(1, 'Zero Width', 'Sale', 100, 0, NULL, 'bad-post.jpg', @ZeroAd);
+ROLLBACK;
+
+-- Should fail - blank image filename
+START TRANSACTION;
+    CALL SubmitAd(1, 'Missing Image', 'Sale', 100, 0, NULL, '', @NoImageAd);
 ROLLBACK;
 
 -- -------------------------------------------------------------------------------
@@ -420,6 +425,63 @@ ROLLBACK;
 
 -- -------------------------------------------------------------------------------
 
+-- DeleteAd: permanently remove an ad, returning its image for cleanup.
+-- Moderation action -- authorization is by Reviewer status, not by poster.
+-- Should succeed - AdID 19 is Approved but not posted to any board
+START TRANSACTION;
+    CALL DeleteAd(19, 22, @DelMsgs, @DelImage);
+    SELECT @DelMsgs AS MessagesDeleted, @DelImage AS ImageToClean;
+    SELECT COUNT(*) AS AdRows FROM Ad WHERE AdID = 19;  -- expect 0
+ROLLBACK;
+
+-- Should succeed - unpost first, then delete an ad that was on a board.
+-- AdID 1 has messages attached, so MessagesDeleted should be non-zero.
+START TRANSACTION;
+    CALL UnpostAd(1, 'BLD', 1, 'A');
+    CALL DeleteAd(1, 26, @UnpostMsgs, @UnpostImage);
+    SELECT @UnpostMsgs AS MessagesDeleted, @UnpostImage AS ImageToClean;
+    SELECT COUNT(*) AS AdRows      FROM Ad              WHERE AdID = 1;  -- expect 0
+    SELECT COUNT(*) AS MessageRows FROM Messages        WHERE AdID = 1;  -- expect 0
+    SELECT COUNT(*) AS PostingRows FROM Ad_Posted_Board WHERE AdID = 1;  -- expect 0
+ROLLBACK;
+
+-- Should succeed - a Pending ad with no messages reports zero deleted
+START TRANSACTION;
+    CALL DeleteAd(25, 28, @PendMsgs, @PendImage);
+    SELECT @PendMsgs AS MessagesDeleted;  -- expect 0
+ROLLBACK;
+
+-- Should fail - AdID 1 is still posted to a board
+START TRANSACTION;
+    CALL DeleteAd(1, 22, @PostedMsgs, @PostedImage);
+ROLLBACK;
+
+-- Should fail - PersonID 5 is a Student, not a Reviewer; a poster can no
+-- longer delete their own ad under this authorization model
+START TRANSACTION;
+    CALL DeleteAd(19, 5, @NonRevMsgs, @NonRevImage);
+ROLLBACK;
+
+-- Should fail - NULL reviewer ID
+START TRANSACTION;
+    CALL DeleteAd(19, NULL, @NullRevMsgs, @NullRevImage);
+ROLLBACK;
+
+-- Should fail - no such ad
+START TRANSACTION;
+    CALL DeleteAd(9999, 22, @NoAdMsgs, @NoAdImage);
+ROLLBACK;
+
+-- Should succeed - deletion is permitted after withdrawal, and is the
+-- mechanism by which a withdrawn ad is eventually purged
+START TRANSACTION;
+    CALL WithdrawAd(19, 15, @WdMsgs);
+    CALL DeleteAd(19, 29, @WdDelMsgs, @WdImage);
+    SELECT COUNT(*) AS AdRows FROM Ad WHERE AdID = 19;  -- expect 0
+ROLLBACK;
+
+-- -------------------------------------------------------------------------------
+
 -- GetNoncompliantPosters: posters with repeated rejections
 -- Should succeed - NULL falls back to the default threshold of 2 rejections
 CALL GetNoncompliantPosters(NULL);
@@ -450,9 +512,9 @@ CALL GetPosterRejectionHistory(9999);
 
 -- -------------------------------------------------------------------------------
 
--- PostedAdsInfo: every ad currently on a board, with its full ad record
+-- vw_PostedAdsInfo: every ad currently on a board, with its full ad record
 SELECT *
-FROM PostedAdsInfo
+FROM vw_PostedAdsInfo
 ORDER BY Building, BldgFloor, Slot, AdID;
 
 -- -------------------------------------------------------------------------------
@@ -551,7 +613,7 @@ ROLLBACK;
 START TRANSACTION;
     CALL ReviewAd(25, 'Approved', 22, NULL);
     CALL PostAd(25, 'LIB', 1, 'A');
-    SELECT * FROM PostedAdsInfo WHERE AdID = 25;
+    SELECT * FROM vw_PostedAdsInfo WHERE AdID = 25;
 ROLLBACK;
 
 -- Should fail - AdID 25 is Pending without the ReviewAd call above

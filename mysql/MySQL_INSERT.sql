@@ -130,50 +130,50 @@ INSERT INTO Employee (PersonID, OfficeLocation, Extension, PositionTitle, IsRevi
 -- once an ad is physically placed on a board (see PostAd), and always on or after
 -- its ReviewDate. IsWithdrawn/WithdrawnDate are independent of ReviewStatus; every
 -- ad in this seed data is un-withdrawn (0, NULL).
-INSERT INTO Ad (PosterID, ReviewerID, Title, AdType, AdLength, AdWidth, Duration, PostDate, ReviewStatus, EnteredPending, ReviewDate, IsWithdrawn, WithdrawnDate) VALUES
+INSERT INTO Ad (PosterID, ReviewerID, Title, AdType, AdLength, AdWidth, Duration, PostDate, ReviewStatus, EnteredPending, ReviewDate, IsWithdrawn, WithdrawnDate, ImageFileName) VALUES
 -- Approved and posted (18)
-(1 , 22,   'Textbook for Sale',              'Sale',      300,   200,   14,  '2026-06-16', 'Approved', '2026-06-14', '2026-06-16', 0, NULL),
-(5 , 26,   'Roommate Wanted',                'Roommate',  400,   250,   21,  '2026-06-21', 'Approved', '2026-06-19', '2026-06-21', 0, NULL),
-(6 , 22,   'Tutoring Services',              'Tutorship', 350,   220,   14,  '2026-06-23', 'Approved', '2026-06-20', '2026-06-23', 0, NULL),
-(7 , 28,   'Campus Event DJ',                'Service',   300,   200,   7,   '2026-06-26', 'Approved', '2026-06-24', '2026-06-26', 0, NULL),
-(8 , 28,   'Used Laptop',                    'Sale',      300,   200,   14,  '2026-06-29', 'Approved', '2026-06-27', '2026-06-29', 0, NULL),
-(5 , 26,   'Study Group Formation',          'Tutorship', 350,   220,   10,  '2026-07-03', 'Approved', '2026-07-01', '2026-07-03', 0, NULL),
-(9 , 22,   'Lab Equipment Sale',             'Sale',      400,   250,   14,  '2026-07-04', 'Approved', '2026-06-26', '2026-06-29', 0, NULL), -- approved 5 days before it was actually posted
-(2 , 28,   'Bike for Sale',                  'Sale',      300,   200,   14,  '2026-07-05', 'Approved', '2026-07-03', '2026-07-05', 0, NULL),
-(10, 28,   'Apartment Sublet',               'Roommate',  400,   250,   30,  '2026-07-06', 'Approved', '2026-07-04', '2026-07-06', 0, NULL),
-(11, 22,   'Guitar Lessons',                 'Tutorship', 350,   220,   21,  '2026-07-07', 'Approved', '2026-07-05', '2026-07-07', 0, NULL),
-(12, 26,   'Math Tutor Available',           'Tutorship', 300,   200,   14,  '2026-07-08', 'Approved', '2026-07-06', '2026-07-08', 0, NULL),
-(6 , 22,   'Engineering Textbooks',          'Sale',      350,   220,   14,  '2026-07-09', 'Approved', '2026-07-07', '2026-07-09', 0, NULL),
-(13, 28,   'Photography Services',           'Service',   400,   250,   21,  '2026-07-10', 'Approved', '2026-07-08', '2026-07-10', 0, NULL),
-(30, 22,   'Colloquium: Quantum Matter',     'Event',     400,   300,   14,  '2026-07-11', 'Approved', '2026-07-08', '2026-07-10', 0, NULL),
-(31, 26,   'Summer Concert on the Green',    'Event',     500,   350,   21,  '2026-07-12', 'Approved', '2026-07-09', '2026-07-11', 0, NULL),
-(23, 28,   'Guest Lecture: Urban Policy',    'Event',     400,   300,   10,  '2026-07-13', 'Approved', '2026-07-10', '2026-07-12', 0, NULL),
-(4 , 22,   'Winter Tires, Set of Four',      'Sale',      300,   200,   14,  '2026-07-14', 'Approved', '2026-07-12', '2026-07-14', 0, NULL),
-(20, 26,   'Piano Accompanist Available',    'Service',   350,   220,   21,  '2026-07-15', 'Approved', '2026-07-13', '2026-07-15', 0, NULL),
+(1 , 22,   'Textbook for Sale',              'Sale',      300,   200,   14,  '2026-06-16', 'Approved', '2026-06-14', '2026-06-16', 0, NULL, 'sale-textbook.jpg'),
+(5 , 26,   'Roommate Wanted',                'Roommate',  400,   250,   21,  '2026-06-21', 'Approved', '2026-06-19', '2026-06-21', 0, NULL, 'roommate-wanted.jpg'),
+(6 , 22,   'Tutoring Services',              'Tutorship', 350,   220,   14,  '2026-06-23', 'Approved', '2026-06-20', '2026-06-23', 0, NULL, 'tutorship-general-services.jpg'),
+(7 , 28,   'Campus Event DJ',                'Service',   300,   200,   7,   '2026-06-26', 'Approved', '2026-06-24', '2026-06-26', 0, NULL, 'service-campus-dj.jpg'),
+(8 , 28,   'Used Laptop',                    'Sale',      300,   200,   14,  '2026-06-29', 'Approved', '2026-06-27', '2026-06-29', 0, NULL, 'sale-used-laptop.jpg'),
+(5 , 26,   'Study Group Formation',          'Tutorship', 350,   220,   10,  '2026-07-03', 'Approved', '2026-07-01', '2026-07-03', 0, NULL, 'tutorship-study-group.jpg'),
+(9 , 22,   'Lab Equipment Sale',             'Sale',      400,   250,   14,  '2026-07-04', 'Approved', '2026-06-26', '2026-06-29', 0, NULL, 'sale-lab-equipment.jpg'), -- approved 5 days before it was actually posted
+(2 , 28,   'Bike for Sale',                  'Sale',      300,   200,   14,  '2026-07-05', 'Approved', '2026-07-03', '2026-07-05', 0, NULL, 'sale-bike.jpg'),
+(10, 28,   'Apartment Sublet',               'Roommate',  400,   250,   30,  '2026-07-06', 'Approved', '2026-07-04', '2026-07-06', 0, NULL, 'roommate-apartment-sublet.jpg'),
+(11, 22,   'Guitar Lessons',                 'Tutorship', 350,   220,   21,  '2026-07-07', 'Approved', '2026-07-05', '2026-07-07', 0, NULL, 'tutorship-guitar-lessons.jpg'),
+(12, 26,   'Math Tutor Available',           'Tutorship', 300,   200,   14,  '2026-07-08', 'Approved', '2026-07-06', '2026-07-08', 0, NULL, 'tutorship-math-tutor.jpg'),
+(6 , 22,   'Engineering Textbooks',          'Sale',      350,   220,   14,  '2026-07-09', 'Approved', '2026-07-07', '2026-07-09', 0, NULL, 'sale-engineering-textbooks.jpg'),
+(13, 28,   'Photography Services',           'Service',   400,   250,   21,  '2026-07-10', 'Approved', '2026-07-08', '2026-07-10', 0, NULL, 'service-photography.jpg'),
+(30, 22,   'Colloquium: Quantum Matter',     'Event',     400,   300,   14,  '2026-07-11', 'Approved', '2026-07-08', '2026-07-10', 0, NULL, 'event-colloquium-quantum-matter.jpg'),
+(31, 26,   'Summer Concert on the Green',    'Event',     500,   350,   21,  '2026-07-12', 'Approved', '2026-07-09', '2026-07-11', 0, NULL, 'event-summer-concert.jpg'),
+(23, 28,   'Guest Lecture: Urban Policy',    'Event',     400,   300,   10,  '2026-07-13', 'Approved', '2026-07-10', '2026-07-12', 0, NULL, 'event-guest-lecture-urban-policy.jpg'),
+(4 , 22,   'Winter Tires, Set of Four',      'Sale',      300,   200,   14,  '2026-07-14', 'Approved', '2026-07-12', '2026-07-14', 0, NULL, 'sale-winter-tires.jpg'),
+(20, 26,   'Piano Accompanist Available',    'Service',   350,   220,   21,  '2026-07-15', 'Approved', '2026-07-13', '2026-07-15', 0, NULL, 'service-piano-accompanist.jpg'),
 
 -- Approved, not yet posted (6)
-(14, 22,   'Programming Help',               'Tutorship', 300,   200,   14,  NULL,         'Approved', '2026-07-08', '2026-07-10', 0, NULL),
-(30, 28,   'Seminar: Science Writing',       'Event',     400,   300,   10,  NULL,         'Approved', '2026-07-13', '2026-07-15', 0, NULL),
-(21, 26,   'Statistics Tutoring',            'Tutorship', 300,   200,   14,  NULL,         'Approved', '2026-07-14', '2026-07-16', 0, NULL),
-(15, 22,   'Room in Shared House',           'Rent',      400,   250,   30,  NULL,         'Approved', '2026-07-15', '2026-07-17', 0, NULL),
-(24, 28,   'Lost and Found Reminder',        'Other',     250,   180,   30,  NULL,         'Approved', '2026-07-16', '2026-07-18', 0, NULL),
-(16, 26,   'Bicycle Repair Service',         'Service',   300,   200,   21,  NULL,         'Approved', '2026-07-17', '2026-07-19', 0, NULL),
+(14, 22,   'Programming Help',               'Tutorship', 300,   200,   14,  NULL,         'Approved', '2026-07-08', '2026-07-10', 0, NULL, 'tutorship-programming-help.jpg'),
+(30, 28,   'Seminar: Science Writing',       'Event',     400,   300,   10,  NULL,         'Approved', '2026-07-13', '2026-07-15', 0, NULL, 'event-seminar-science-writing.jpg'),
+(21, 26,   'Statistics Tutoring',            'Tutorship', 300,   200,   14,  NULL,         'Approved', '2026-07-14', '2026-07-16', 0, NULL, 'tutorship-statistics.jpg'),
+(15, 22,   'Room in Shared House',           'Rent',      400,   250,   30,  NULL,         'Approved', '2026-07-15', '2026-07-17', 0, NULL, 'rent-room-shared-house.jpg'),
+(24, 28,   'Lost and Found Reminder',        'Other',     250,   180,   30,  NULL,         'Approved', '2026-07-16', '2026-07-18', 0, NULL, 'other-lost-and-found.jpg'),
+(16, 26,   'Bicycle Repair Service',         'Service',   300,   200,   21,  NULL,         'Approved', '2026-07-17', '2026-07-19', 0, NULL, 'service-bicycle-repair.jpg'),
 
 -- Pending (7)
-(17, NULL, 'Chemistry Lab Partner',          'Tutorship', 300,   200,   7,   NULL,         'Pending',  '2026-07-16', NULL,         0, NULL),
-(18, NULL, 'Business Books',                 'Sale',      350,   220,   14,  NULL,         'Pending',  '2026-07-17', NULL,         0, NULL),
-(3 , NULL, 'Car for Sale',                   'Sale',      400,   250,   21,  NULL,         'Pending',  '2026-07-18', NULL,         0, NULL),
-(19, NULL, 'History Study Group',            'Tutorship', 300,   200,   10,  NULL,         'Pending',  '2026-07-19', NULL,         0, NULL),
-(31, NULL, 'Departmental Open House',        'Event',     400,   300,   14,  NULL,         'Pending',  '2026-07-21', NULL,         0, NULL),
-(27, NULL, 'Carpool to Downtown',            'Other',     250,   180,   21,  NULL,         'Pending',  '2026-07-21', NULL,         0, NULL),
-(21, NULL, 'Textbook Bundle, CS Courses',    'Sale',      300,   200,   14,  NULL,         'Pending',  '2026-07-21', NULL,         0, NULL),
+(17, NULL, 'Chemistry Lab Partner',          'Tutorship', 300,   200,   7,   NULL,         'Pending',  '2026-07-16', NULL,         0, NULL, 'tutorship-chemistry-lab-partner.jpg'),
+(18, NULL, 'Business Books',                 'Sale',      350,   220,   14,  NULL,         'Pending',  '2026-07-17', NULL,         0, NULL, 'sale-business-books.jpg'),
+(3 , NULL, 'Car for Sale',                   'Sale',      400,   250,   21,  NULL,         'Pending',  '2026-07-18', NULL,         0, NULL, 'sale-car.jpg'),
+(19, NULL, 'History Study Group',            'Tutorship', 300,   200,   10,  NULL,         'Pending',  '2026-07-19', NULL,         0, NULL, 'tutorship-history-study-group.jpg'),
+(31, NULL, 'Departmental Open House',        'Event',     400,   300,   14,  NULL,         'Pending',  '2026-07-21', NULL,         0, NULL, 'event-departmental-open-house.jpg'),
+(27, NULL, 'Carpool to Downtown',            'Other',     250,   180,   21,  NULL,         'Pending',  '2026-07-21', NULL,         0, NULL, 'other-carpool-downtown.jpg'),
+(21, NULL, 'Textbook Bundle, CS Courses',    'Sale',      300,   200,   14,  NULL,         'Pending',  '2026-07-21', NULL,         0, NULL, 'sale-textbook-bundle-cs.jpg'),
 
 -- Rejected (5)
-(17, 22,   'Prohibited Item',                'Sale',      300,   200,   14,  NULL,         'Rejected', '2026-06-30', '2026-07-02', 0, NULL),
-(19, 28,   'Inappropriate Service',          'Service',   350,   220,   14,  NULL,         'Rejected', '2026-07-06', '2026-07-08', 0, NULL),
-(19, 28,   'Giant Ad',                       'Tutorship', 3500,  2100,  14,  NULL,         'Rejected', '2026-07-07', '2026-07-09', 0, NULL),
-(19, 26,   'Unverified Cash Offer',          'Other',     300,   200,   14,  NULL,         'Rejected', '2026-07-12', '2026-07-14', 0, NULL),
-(29, 22,   'Off-Campus Solicitation',        'Other',     300,   200,   14,  NULL,         'Rejected', '2026-07-15', '2026-07-17', 0, NULL);
+(17, 22,   'Prohibited Item',                'Sale',      300,   200,   14,  NULL,         'Rejected', '2026-06-30', '2026-07-02', 0, NULL, 'sale-prohibited-item.jpg'),
+(19, 28,   'Inappropriate Service',          'Service',   350,   220,   14,  NULL,         'Rejected', '2026-07-06', '2026-07-08', 0, NULL, 'service-inappropriate.jpg'),
+(19, 28,   'Giant Ad',                       'Tutorship', 3500,  2100,  14,  NULL,         'Rejected', '2026-07-07', '2026-07-09', 0, NULL, 'tutorship-giant-ad.jpg'),
+(19, 26,   'Unverified Cash Offer',          'Other',     300,   200,   14,  NULL,         'Rejected', '2026-07-12', '2026-07-14', 0, NULL, 'other-unverified-cash-offer.jpg'),
+(29, 22,   'Off-Campus Solicitation',        'Other',     300,   200,   14,  NULL,         'Rejected', '2026-07-15', '2026-07-17', 0, NULL, 'other-off-campus-solicitation.jpg');
 
 -- Insert 7 Boards
 INSERT INTO Board (Building, BldgFloor, Slot, BoardLength, BoardWidth) VALUES

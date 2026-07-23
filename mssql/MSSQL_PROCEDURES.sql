@@ -4,7 +4,7 @@
 -- LOAD ORDER: 2 of 3
 --   MSSQL_VIEWS.sql  ->  MSSQL_PROCEDURES.sql  ->  MSSQL_TESTS.sql
 -- Every view in MSSQL_VIEWS.sql must exist before this file is run: PostAd
--- reads vw_ExpiredAds, GetAdPostings reads PostedAdsInfo, and CheckAdFit reads
+-- reads vw_ExpiredAds, GetAdPostings reads vw_PostedAdsInfo, and CheckAdFit reads
 -- vw_BoardSpace. Procedures may call one another across categories
 -- (WithdrawAd calls DeleteAdMessages), but SQL Server resolves procedure
 -- bodies at execution time, so the order within this file does not matter.
@@ -423,7 +423,8 @@ BEGIN
             WHEN S.PersonID IS NOT NULL THEN COALESCE(S.Major, 'Undeclared')
             ELSE 'N/A'
         END AS Major,
-        A.AdID
+        A.AdID,
+        A.ImageFileName
     FROM 
         Person AS P
         INNER JOIN Ad AS A ON P.PersonID = A.PosterID
@@ -484,13 +485,14 @@ GO
 --      physical posting (PostAd) are handled by their own procedures.
 --      This procedure must be called inside a transaction the CALLER controls.
 CREATE OR ALTER PROCEDURE SubmitAd
-    @_PosterID INT,
-    @_Title    VARCHAR(128),
-    @_AdType   VARCHAR(20),
-    @_AdLength INT,
-    @_AdWidth  INT,
-    @_Duration INT = 14,
-    @_AdID     INT = NULL OUTPUT
+    @_PosterID      INT,
+    @_Title         VARCHAR(128),
+    @_AdType        VARCHAR(20),
+    @_AdLength      INT,
+    @_AdWidth       INT,
+    @_Duration      INT = 14,
+    @_ImageFileName VARCHAR(255),
+    @_AdID          INT = NULL OUTPUT
 AS
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM Person WHERE PersonID = @_PosterID)
@@ -520,6 +522,12 @@ BEGIN
     IF @_Duration IS NULL OR @_Duration <= 0
     BEGIN
         RAISERROR('Error: Duration must be positive.', 16, 1);
+        RETURN;
+    END
+
+    IF @_ImageFileName IS NULL OR LTRIM(RTRIM(@_ImageFileName)) = ''
+    BEGIN
+        RAISERROR('Error: Image file is required.', 16, 1);
         RETURN;
     END
 
@@ -635,7 +643,61 @@ BEGIN
 
     EXEC DeleteAdMessages @_AdID = @_AdID, @_DeletedCount = @_DeletedMessageCount OUTPUT;
 END
+
+-- -------------------------------------------------------------------------------
 GO
+-- Permanently delete an ad. Admin-initiated, and distinct from WithdrawAd:
+--      withdrawal is a reversible-looking flag that preserves the ad record and
+--      its review history, while this removes the row outright. Refuses while
+--      the ad is still posted to any board, since fk_adpostedboard_ad is
+--      ON DELETE CASCADE and would otherwise silently strip it from physical
+--      boards with no takedown worklist entry -- run UnpostAd first (see
+--      vw_PendingRemoval for the ads awaiting takedown). Messages are removed
+--      explicitly via DeleteAdMessages, because fk_messages_ad is deliberately
+--      NO ACTION rather than cascading.
+--      The ad's ImageFileName is returned so the caller can clean up the stored
+--      file; the database holds only the reference, not the file itself.
+--      This procedure must be called inside a transaction the CALLER controls.
+--      This procedure is a mederation tool, not to be used for clean-up.
+CREATE OR ALTER PROCEDURE DeleteAd
+    @_AdID                INT,
+    @_ReviewerID          INT,
+    @_DeletedMessageCount INT          = NULL OUTPUT,
+    @_ImageFileName       VARCHAR(255) = NULL OUTPUT
+AS
+BEGIN
+    SELECT @_ImageFileName = ImageFileName
+    FROM Ad WITH (UPDLOCK, HOLDLOCK)
+    WHERE AdID = @_AdID;
+
+    IF @_ImageFileName IS NULL
+    BEGIN
+        RAISERROR('Error: No ad exists with the given AdID.', 16, 1);
+        RETURN;
+    END
+
+    IF @_ReviewerID IS NULL OR @_ReviewerID NOT IN (
+        SELECT PersonID FROM Employee WHERE IsReviewer = 1)
+    BEGIN
+        RAISERROR('Invalid Reviewer ID. Only a Reviewer can evaluate an ad.', 16, 1);
+        RETURN;
+    END
+
+    DECLARE @PostedCount INT;
+    SELECT @PostedCount = COUNT(*)
+    FROM Ad_Posted_Board WITH (UPDLOCK, HOLDLOCK)
+    WHERE AdID = @_AdID;
+
+    IF @PostedCount > 0
+    BEGIN
+        RAISERROR('Error: This ad is still posted to %d board(s). Unpost it first.', 16, 1, @PostedCount);
+        RETURN;
+    END
+
+    EXEC DeleteAdMessages @_AdID = @_AdID, @_DeletedCount = @_DeletedMessageCount OUTPUT;
+
+    DELETE FROM Ad WHERE AdID = @_AdID;
+END
 
 -- -------------------------------------------------------------------------------
 GO
@@ -756,7 +818,7 @@ BEGIN
 
     DECLARE @PostedCount INT;
     SELECT @PostedCount = COUNT(*)
-    FROM Ad_Posted_Board
+    FROM Ad_Posted_Board WITH (UPDLOCK, HOLDLOCK)
     WHERE Building = @_Building AND BldgFloor = @_BldgFloor AND Slot = @_Slot;
 
     IF @PostedCount > 0
@@ -886,7 +948,6 @@ BEGIN
           AND BldgFloor = @_BldgFloor AND Slot = @_Slot;
     END
 END
-GO
 
 -- -------------------------------------------------------------------------------
 GO
@@ -920,7 +981,7 @@ CREATE OR ALTER PROCEDURE GetAdPostings
 AS
 BEGIN
     SELECT *
-    FROM PostedAdsInfo
+    FROM vw_PostedAdsInfo
     WHERE AdID = @_AdID
 END
 GO

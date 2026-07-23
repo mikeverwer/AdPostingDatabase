@@ -104,6 +104,7 @@ CREATE TABLE Ad (
 	ReviewDate  	DATE                NULL,
 	IsWithdrawn     BIT                 NOT NULL    DEFAULT (0),
     WithdrawnDate   DATE                NULL,
+	ImageFileName	VARCHAR(255)		NOT NULL,
 	-- Constraints
 	PRIMARY KEY (AdID),
 	CONSTRAINT chk_ad_type              CHECK (AdType IN ('Tutorship','Rent','Sale','Roommate','Event', 'Service', 'Other')),
