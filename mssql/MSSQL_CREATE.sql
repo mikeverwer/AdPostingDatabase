@@ -99,7 +99,7 @@ CREATE TABLE Ad (
 	AdWidth 		INT					NOT NULL,
 	Duration 		INT 				NOT NULL	DEFAULT (14),
 	PostDate 		DATE				NULL,
-	ReviewStatus 		VARCHAR(10) 		NOT NULL	DEFAULT ('Pending'),
+	ReviewStatus 	VARCHAR(10) 		NOT NULL	DEFAULT ('Pending'),
 	EnteredPending  DATE                NOT NULL    DEFAULT (CAST(GETDATE() AS DATE)),
 	ReviewDate  	DATE                NULL,
 	IsWithdrawn     BIT                 NOT NULL    DEFAULT (0),
