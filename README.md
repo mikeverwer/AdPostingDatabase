@@ -2,7 +2,7 @@
 
 A relational database managing advertisement postings on physical campus boards, implemented in parallel for **MS SQL Server** and **MySQL**. The system models a branching person specialization hierarchy (Person → CollegeMember → Student/Employee), an ad review workflow with reviewer eligibility rules, board capacity accounting based on physical dimensions, and per-ad messaging between posters and interested parties.
 
-A full design writeup, covering the EER model, the supertype/subtype mapping decision, BCNF verification, cross-platform implementation notes, and description of views, procedures, and workflows, is available on my site: *mikeverwer.github.io/projects/ad_posting_db.html*.
+A full design writeup, covering the EER model, the supertype/subtype mapping decision, BCNF verification, cross-platform implementation notes, and description of views, procedures, and workflows, is available on my site: [**Article**](mikeverwer.github.io/projects/ad_posting_db.html.)
 
 This project originated as the final project of a database systems course in my Data Analytics diploma at Douglas College but has since greatly expanded. The modeling, both implementations, and all queries are my own work.
 
